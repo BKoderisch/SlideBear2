@@ -13,8 +13,9 @@ Playlist :: struct {
 }
 
 Playlist_JSON :: struct {
-	name:  string `json:"name"`,
-	songs: []int  `json:"songs"`,
+	name:       string   `json:"name"`,
+	songs:      []int    `json:"songs"`,
+	song_paths: []string `json:"song_paths"`,
 }
 
 default_playlists :: proc(allocator := context.allocator) -> [dynamic]Playlist {
@@ -23,7 +24,7 @@ default_playlists :: proc(allocator := context.allocator) -> [dynamic]Playlist {
 	return result
 }
 
-load_playlists :: proc(path: string, allocator := context.allocator) -> [dynamic]Playlist {
+load_playlists :: proc(path: string, all_songs: []Song, allocator := context.allocator) -> [dynamic]Playlist {
 	data, err := os.read_entire_file_from_path(path, context.temp_allocator)
 	if err != nil do return default_playlists(allocator)
 	defer delete(data, context.temp_allocator)
@@ -34,19 +35,53 @@ load_playlists :: proc(path: string, allocator := context.allocator) -> [dynamic
 	}
 	if len(raw) == 0 do return default_playlists(allocator)
 
+	path_to_idx := make(map[string]int, context.temp_allocator)
+	for s, i in all_songs {
+		if len(s.path) > 0 {
+			path_to_idx[s.path] = i
+		}
+	}
+
 	result := make([dynamic]Playlist, allocator)
 	for p in raw {
 		songs := make([dynamic]int, allocator)
-		for s in p.songs { append(&songs, s) }
+		if len(p.song_paths) > 0 {
+			for song_path in p.song_paths {
+				idx, ok := path_to_idx[song_path]
+				if ok {
+					add_song_to_playlist(idx, &songs)
+				}
+			}
+		}
+		if len(songs) == 0 {
+			for s in p.songs {
+				if s >= 0 && s < len(all_songs) {
+					add_song_to_playlist(s, &songs)
+				}
+			}
+		}
 		append(&result, Playlist{name = strings.clone(p.name, allocator), songs = songs})
 	}
 	return result
 }
 
-save_playlists :: proc(path: string, playlists: []Playlist) {
+save_playlists :: proc(path: string, playlists: []Playlist, all_songs: []Song) {
 	raw := make([]Playlist_JSON, len(playlists), context.temp_allocator)
 	for p, i in playlists {
-		raw[i] = Playlist_JSON{name = p.name, songs = p.songs[:]}
+		song_paths := make([dynamic]string, context.temp_allocator)
+		for song_idx in p.songs {
+			if song_idx >= 0 && song_idx < len(all_songs) {
+				song_path := all_songs[song_idx].path
+				if len(song_path) > 0 {
+					append(&song_paths, song_path)
+				}
+			}
+		}
+		raw[i] = Playlist_JSON{
+			name       = p.name,
+			songs      = p.songs[:],
+			song_paths = song_paths[:],
+		}
 	}
 	data, err := json.marshal(raw, allocator = context.temp_allocator)
 	if err != nil { fmt.eprintln("playlists.json marshal error:", err); return }

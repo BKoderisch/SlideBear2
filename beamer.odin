@@ -73,8 +73,9 @@ show_text_on_surface :: proc(surf: ^sdl.Surface, w, h: i32, font: ^ttf.Font, tex
 
 	line_h   := ttf.FontHeight(font)
 	margin_x := w / 12
+	margin_y := h / 12
 	max_w    := w - margin_x * 2
-	max_h    := h - h/12
+	max_h    := h - margin_y * 2
 
 	lines := strings.split(text, "\n", context.temp_allocator)
 
@@ -95,7 +96,7 @@ show_text_on_surface :: proc(surf: ^sdl.Surface, w, h: i32, font: ^ttf.Font, tex
 
 	scaled_line_h := i32(f32(line_h) * factor)
 	total_h := scaled_line_h * i32(len(lines))
-	y_start := (h - total_h) / 2
+	y_start := margin_y
 
 	for line, i in lines {
 		if len(line) == 0 do continue

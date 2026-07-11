@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
+import "core:slice"
 import "core:strings"
 
 // Parse a CCLI/SongSelect .txt export file.
@@ -189,18 +190,25 @@ load_song_library :: proc(dir: string, allocator := context.allocator) -> []Song
 		return nil
 	}
 
+	paths: [dynamic]string
+	defer delete(paths)
+	for entry in entries {
+		if strings.has_suffix(entry.name, ".txt") {
+			append(&paths, entry.fullpath)
+		}
+	}
+	slice.sort(paths[:])
+
 	songs: [dynamic]Song
 	songs.allocator = allocator
 
-	for entry in entries {
-		if !strings.has_suffix(entry.name, ".txt") do continue
-
-		data, ferr := os.read_entire_file_from_path(entry.fullpath, context.temp_allocator)
+	for path in paths {
+		data, ferr := os.read_entire_file_from_path(path, context.temp_allocator)
 		if ferr != nil do continue
 
 		src := string(data)
 		if song, ok := parse_ccli_txt(src, allocator); ok {
-			song.path = strings.clone(entry.fullpath, allocator)
+			song.path = strings.clone(path, allocator)
 			append(&songs, song)
 			fmt.printf("Loaded song: %s (%d sections)\n", song.title, len(song.sections))
 		}

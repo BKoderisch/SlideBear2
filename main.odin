@@ -949,7 +949,7 @@ main :: proc() {
 		append(&all_songs, demo_song)
 	}
 
-	playlists := load_playlists(PLAYLIST_FILE)
+	playlists := load_playlists(PLAYLIST_FILE, all_songs[:])
 	defer playlists_free(&playlists)
 	// Drop stale song indices left over from an earlier song library.
 	for &pl in playlists {
@@ -957,6 +957,9 @@ main :: proc() {
 			if pl.songs[i] < 0 || pl.songs[i] >= len(all_songs) { ordered_remove(&pl.songs, i) }
 		}
 	}
+	// Keep playlists.json in canonical form (with stable song paths) so a
+	// restart keeps the same songs even if song ordering changes.
+	save_playlists(PLAYLIST_FILE, playlists[:], all_songs[:])
 
 	song_idx      := 0
 	section_idx   := 0
@@ -1202,7 +1205,7 @@ main :: proc() {
 					case .Delete:
 						if delete_pending_idx == idx {
 							delete_song(idx, &all_songs, &playlists)
-							save_playlists(PLAYLIST_FILE, playlists[:])
+							save_playlists(PLAYLIST_FILE, playlists[:], all_songs[:])
 							delete_pending_idx = -1
 						} else {
 							delete_pending_idx = idx
@@ -1234,7 +1237,7 @@ main :: proc() {
 								switch_song(idx, all_songs[:], &song_idx, &section_idx, &section_text_buf, &in_slide_mode)
 							}
 						}
-						save_playlists(PLAYLIST_FILE, playlists[:])
+						save_playlists(PLAYLIST_FILE, playlists[:], all_songs[:])
 					case .Close:
 						add_active = false
 						sdl.StopTextInput()
@@ -1259,7 +1262,7 @@ main :: proc() {
 				case .Setlist_Remove:
 					playlists_remove(&playlists, click_idx)
 					if active_playlist >= len(playlists) { active_playlist = len(playlists) - 1 }
-					save_playlists(PLAYLIST_FILE, playlists[:])
+					save_playlists(PLAYLIST_FILE, playlists[:], all_songs[:])
 				case .Setlist_New:
 					naming_playlist = true
 					strings.builder_reset(&name_buf)
@@ -1268,7 +1271,7 @@ main :: proc() {
 					switch_song(click_idx, all_songs[:], &song_idx, &section_idx, &section_text_buf, &in_slide_mode)
 				case .Song_Remove:
 					remove_song_from_playlist(click_idx, &playlists[active_playlist].songs)
-					save_playlists(PLAYLIST_FILE, playlists[:])
+					save_playlists(PLAYLIST_FILE, playlists[:], all_songs[:])
 				case .Add_Open:
 					add_active = true
 					strings.builder_reset(&add_search_buf)
@@ -1459,7 +1462,7 @@ main :: proc() {
 						final := name if len(name) > 0 else "Neue Setlist"
 						append(&playlists, Playlist{name = strings.clone(final), songs = make([dynamic]int)})
 						active_playlist = len(playlists) - 1
-						save_playlists(PLAYLIST_FILE, playlists[:])
+						save_playlists(PLAYLIST_FILE, playlists[:], all_songs[:])
 						naming_playlist = false
 						sdl.StopTextInput()
 					}
@@ -1489,7 +1492,7 @@ main :: proc() {
 						for lib_idx, pos in playlists[active_playlist].songs {
 							if lib_idx == song_idx {
 								remove_song_from_playlist(pos, &playlists[active_playlist].songs)
-								save_playlists(PLAYLIST_FILE, playlists[:])
+								save_playlists(PLAYLIST_FILE, playlists[:], all_songs[:])
 								break
 							}
 						}
