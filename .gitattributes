@@ -1,0 +1,2 @@
+# PowerShell-Skripte unverändert lassen (UTF-8 mit BOM, CRLF), sonst zeigt Windows PowerShell 5.1 Umlaute falsch an
+*.ps1 -text
