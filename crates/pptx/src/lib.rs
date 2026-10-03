@@ -9,14 +9,13 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use roxmltree::{Document, Node};
+use slidebear_core::Scene;
 use slidebear_core::assets::content_name;
 use slidebear_core::scene::{
-    Color, Element, ElementKind, HAlign, ImageFit, ImageStyle, Outline, Rect, Shadow, ShapeKind, ShapeStyle,
-    Stroke, TextStyle, VAlign,
+    Color, Element, ElementKind, HAlign, ImageFit, ImageStyle, Outline, Rect, Shadow, ShapeKind, ShapeStyle, Stroke, TextStyle, VAlign,
 };
-use slidebear_core::Scene;
 
-use color::{parse_fill_color, Theme};
+use color::{Theme, parse_fill_color};
 use xml::{attr, attr_bool, attr_i64, child, children, path, rel_attr};
 
 #[derive(Debug, thiserror::Error)]
@@ -82,7 +81,8 @@ pub fn import_bytes(data: &[u8]) -> Result<Import> {
 
     let mut out = Import::default();
     for (i, part) in slide_parts.iter().enumerate() {
-        let mut ctx = Ctx { pkg: &pkg, theme: &theme, scale, width, height, assets: &mut out.assets, fonts: &mut out.fonts, warnings: Vec::new() };
+        let mut ctx =
+            Ctx { pkg: &pkg, theme: &theme, scale, width, height, assets: &mut out.assets, fonts: &mut out.fonts, warnings: Vec::new() };
         match ctx.slide(part) {
             Ok((scene, hidden)) => {
                 let warnings = std::mem::take(&mut ctx.warnings);
@@ -318,7 +318,8 @@ impl Ctx<'_> {
         if let Some(pr) = child(bg, "bgPr") {
             if let Some(blip) = path(pr, &["blipFill", "blip"]) {
                 let asset = self.blip_asset(blip, owner)?;
-                let mut e = Element::new("Hintergrund", full, ElementKind::Image(ImageStyle { asset, fit: ImageFit::Cover, filters: Vec::new() }));
+                let mut e =
+                    Element::new("Hintergrund", full, ElementKind::Image(ImageStyle { asset, fit: ImageFit::Cover, filters: Vec::new() }));
                 e.locked = true;
                 return Some(e);
             }
@@ -338,7 +339,8 @@ impl Ctx<'_> {
     }
 
     fn bg_rect(&self, frame: Rect, color: Color) -> Element {
-        let mut e = Element::new("Hintergrund", frame, ElementKind::Shape(ShapeStyle { shape: ShapeKind::Rect, fill: Some(color), stroke: None }));
+        let mut e =
+            Element::new("Hintergrund", frame, ElementKind::Shape(ShapeStyle { shape: ShapeKind::Rect, fill: Some(color), stroke: None }));
         e.locked = true;
         e
     }
@@ -365,21 +367,12 @@ impl Ctx<'_> {
         let ext = child(xfrm, "ext")?;
         let (x, y) = (attr_i64(off, "x")? as f32, attr_i64(off, "y")? as f32);
         let (w, h) = (attr_i64(ext, "cx")? as f32, attr_i64(ext, "cy")? as f32);
-        Some(Rect::new(
-            self.px(xf.ox + x * xf.sx),
-            self.px(xf.oy + y * xf.sy),
-            self.px(w * xf.sx),
-            self.px(h * xf.sy),
-        ))
+        Some(Rect::new(self.px(xf.ox + x * xf.sx), self.px(xf.oy + y * xf.sy), self.px(w * xf.sx), self.px(h * xf.sy)))
     }
 
     fn walk(&mut self, tree: Node, part: &str, xf: Xf, inherit: Option<&Inheritance>, out: &mut Vec<Element>) {
         for n in children(tree) {
-            let hidden = n
-                .descendants()
-                .find(|c| c.tag_name().name() == "cNvPr")
-                .and_then(|c| attr_bool(c, "hidden"))
-                .unwrap_or(false);
+            let hidden = n.descendants().find(|c| c.tag_name().name() == "cNvPr").and_then(|c| attr_bool(c, "hidden")).unwrap_or(false);
             if hidden {
                 continue;
             }
@@ -422,7 +415,11 @@ impl Ctx<'_> {
         }
         self.check_rotation(n);
         let Some(asset) = self.blip_asset(blip, part) else { return };
-        let mut e = Element::new(Self::name_of(n, "Bild"), frame, ElementKind::Image(ImageStyle { asset, fit: ImageFit::Stretch, filters: Vec::new() }));
+        let mut e = Element::new(
+            Self::name_of(n, "Bild"),
+            frame,
+            ElementKind::Image(ImageStyle { asset, fit: ImageFit::Stretch, filters: Vec::new() }),
+        );
         if let Some(a) = child(blip, "alphaModFix").and_then(|a| attr_i64(a, "amt")) {
             e.opacity = (a as f32 / 100_000.0).clamp(0.0, 1.0);
         }
@@ -449,9 +446,7 @@ impl Ctx<'_> {
             _ => Vec::new(),
         };
 
-        let frame = path(n, &["spPr", "xfrm"])
-            .and_then(|x| self.frame(x, xf))
-            .or_else(|| inherited.iter().find_map(|i| i.frame));
+        let frame = path(n, &["spPr", "xfrm"]).and_then(|x| self.frame(x, xf)).or_else(|| inherited.iter().find_map(|i| i.frame));
         let Some(frame) = frame else { return };
         self.check_rotation(n);
         let name = Self::name_of(n, "Form");
@@ -459,7 +454,11 @@ impl Ctx<'_> {
         if let Some(sp_pr) = child(n, "spPr") {
             if let Some(blip) = path(sp_pr, &["blipFill", "blip"]) {
                 if let Some(asset) = self.blip_asset(blip, part) {
-                    out.push(Element::new(name.clone(), frame, ElementKind::Image(ImageStyle { asset, fit: ImageFit::Cover, filters: Vec::new() })));
+                    out.push(Element::new(
+                        name.clone(),
+                        frame,
+                        ElementKind::Image(ImageStyle { asset, fit: ImageFit::Cover, filters: Vec::new() }),
+                    ));
                 }
             } else if let Some(style) = self.shape_style(sp_pr, frame) {
                 out.push(Element::new(name.clone(), frame, ElementKind::Shape(style)));
@@ -548,9 +547,7 @@ impl Ctx<'_> {
                 "r" => HAlign::Right,
                 _ => HAlign::Left,
             }),
-            line_height: path(ppr, &["lnSpc", "spcPct"])
-                .and_then(|s| attr_i64(s, "val"))
-                .map(|v| v as f32 / 100_000.0 * 1.2),
+            line_height: path(ppr, &["lnSpc", "spcPct"]).and_then(|s| attr_i64(s, "val")).map(|v| v as f32 / 100_000.0 * 1.2),
         }
     }
 
@@ -718,9 +715,8 @@ impl Inheritance<'_> {
     fn find(&self, kind: &str, idx: Option<&str>) -> Vec<&Inherited> {
         let kind = norm_kind(kind);
         let same_kind = |p: &&Inherited| norm_kind(&p.kind) == kind;
-        let layout = idx
-            .and_then(|i| self.layout.iter().find(|p| p.idx.as_deref() == Some(i)))
-            .or_else(|| self.layout.iter().find(same_kind));
+        let layout =
+            idx.and_then(|i| self.layout.iter().find(|p| p.idx.as_deref() == Some(i))).or_else(|| self.layout.iter().find(same_kind));
         layout.into_iter().chain(self.master.iter().find(same_kind)).collect()
     }
 }

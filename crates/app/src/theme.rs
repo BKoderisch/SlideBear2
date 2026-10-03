@@ -6,8 +6,8 @@
 use std::sync::Arc;
 
 use eframe::egui::{
-    self, epaint::text::VariationCoords, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, FontTweak,
-    Pos2, Shadow, Shape, Stroke, TextStyle, Vec2,
+    self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, FontTweak, Pos2, Shadow, Shape, Stroke, TextStyle, Vec2,
+    epaint::text::VariationCoords,
 };
 
 const fn hex(rgb: u32) -> Color32 {
@@ -168,6 +168,41 @@ pub fn comic_title(ui: &mut egui::Ui, text: &str, size: f32) {
     p.galley(o, snow, SNOW);
 }
 
+const BUBBLE_RADIUS: f32 = 12.0;
+
+/// Comic-Sprechblase mit hartem Schatten und einem Zipfel, dessen Spitze auf `speaker` zeigt
+/// (z. B. das Maul des Eisbären links daneben).
+pub fn speech_bubble<R>(ui: &mut egui::Ui, fill: Color32, speaker: Pos2, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.add_space(14.0);
+    let p = ui.painter().clone();
+    let shadow_slot = p.add(Shape::Noop);
+    let tail_shadow_slot = p.add(Shape::Noop);
+    let inner = egui::Frame::new()
+        .fill(fill)
+        .stroke(Stroke::new(OUTLINE, INK))
+        .corner_radius(CornerRadius::same(BUBBLE_RADIUS as u8))
+        .inner_margin(egui::Margin { left: 14, right: 16, top: 6, bottom: 6 })
+        .show(ui, add_contents);
+    let r = inner.response.rect;
+    let off = Vec2::splat(3.0);
+    // Zipfel: breite Basis auf Höhe des Sprechers, knapp innerhalb der Kontur (überdeckt sie dort),
+    // Spitze kurz vor dem Sprecher
+    // nur auf dem geraden Stück der linken Kante ansetzen, nicht in den runden Ecken
+    const HALF: f32 = 6.0;
+    let (lo, hi) = (r.top() + BUBBLE_RADIUS + HALF, r.bottom() - BUBBLE_RADIUS - HALF);
+    let base_y = if lo <= hi { speaker.y.clamp(lo, hi) } else { r.center().y };
+    let top = Pos2::new(r.left() + OUTLINE, base_y - HALF);
+    let bottom = Pos2::new(r.left() + OUTLINE, base_y + HALF);
+    let tip = Pos2::new(speaker.x + 2.0, speaker.y);
+    p.set(shadow_slot, Shape::rect_filled(r.translate(off), CornerRadius::same(BUBBLE_RADIUS as u8), INK));
+    p.set(tail_shadow_slot, Shape::convex_polygon(vec![top + off, tip + off, bottom + off], INK, Stroke::NONE));
+    p.add(Shape::convex_polygon(vec![top, tip, bottom], fill, Stroke::NONE));
+    let ink = Stroke::new(OUTLINE, INK);
+    p.line_segment([Pos2::new(r.left(), top.y), tip], ink);
+    p.line_segment([tip, Pos2::new(r.left(), bottom.y)], ink);
+    inner.inner
+}
+
 /// Pillen-Badge mit Tinten-Kontur.
 pub fn badge(ui: &mut egui::Ui, text: &str, fill: Color32) {
     egui::Frame::new()
@@ -235,7 +270,10 @@ const BEAR: [Part; 18] = [
 
 /// Zeichnet den Comic-Eisbärkopf in ein Quadrat der Kantenlänge `size`.
 pub fn bear_logo(ui: &mut egui::Ui, size: f32) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::click());
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    // Beim Darüberfahren hüpft der Bär ein kleines Stück
+    let rect = if resp.hovered() { rect.translate(Vec2::new(0.0, -size * 0.06)) } else { rect };
     let painter = ui.painter_at(rect.expand(size * 0.1));
     let at = |p: (f32, f32)| Pos2::new(rect.min.x + p.0 * size, rect.min.y + p.1 * size);
     let ink = Stroke::new((OUTLINE_W * size).max(1.5), INK);
@@ -376,5 +414,47 @@ mod tests {
         let defs = fonts();
         assert!(defs.font_data.contains_key("fredoka"));
         assert!(defs.families[&bold()].first().is_some_and(|f| f == "fredoka-bold"));
+    }
+}
+
+#[cfg(test)]
+mod glyph_tests {
+    use super::*;
+
+    /// Jedes Sonderzeichen in den Texten der Oberfläche muss in einer der eingebauten Schriften
+    /// (Fredoka + egui-Standardschriften) vorkommen, sonst erscheint ein leeres Kästchen.
+    #[test]
+    fn all_ui_symbols_have_glyphs() {
+        // Nur Schriften der Familien, die die Oberfläche für Text nutzt (nicht Monospace)
+        let defs = fonts();
+        let used: std::collections::BTreeSet<&String> =
+            [FontFamily::Proportional, bold()].iter().flat_map(|f| defs.families[f].iter()).collect();
+        let faces: Vec<Vec<u8>> = used.iter().map(|n| defs.font_data[*n].font.to_vec()).collect();
+        let covered = |c: char| faces.iter().any(|data| ttf_parser::Face::parse(data, 0).is_ok_and(|f| f.glyph_index(c).is_some()));
+
+        let mut missing = Vec::new();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let src = std::fs::read_to_string(&path).unwrap();
+            for (n, line) in src.lines().enumerate() {
+                let code = line.trim_start();
+                if code.starts_with("//") {
+                    continue;
+                }
+                // nur Text in String-Literalen prüfen
+                for (i, part) in code.split('"').enumerate() {
+                    if i % 2 == 0 {
+                        continue;
+                    }
+                    for c in part.chars().filter(|c| !c.is_ascii() && !c.is_whitespace()) {
+                        if !covered(c) {
+                            missing.push(format!("{}:{} {c:?} (U+{:04X})", path.file_name().unwrap().to_string_lossy(), n + 1, c as u32));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(missing.is_empty(), "Zeichen ohne Glyphe:\n{}", missing.join("\n"));
     }
 }

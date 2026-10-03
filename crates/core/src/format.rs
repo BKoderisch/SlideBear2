@@ -58,11 +58,7 @@ pub fn format_date(fields: &EventFields, style: &DateStyle) -> String {
 
 /// Einzelne Uhrzeit ohne Suffix: `19:30`, bei `omit_zero_minutes` `10` statt `10:00`.
 pub fn format_clock(t: NaiveTime, style: &TimeStyle) -> String {
-    if style.omit_zero_minutes && t.minute() == 0 {
-        t.hour().to_string()
-    } else {
-        format!("{}:{:02}", t.hour(), t.minute())
-    }
+    if style.omit_zero_minutes && t.minute() == 0 { t.hour().to_string() } else { format!("{}:{:02}", t.hour(), t.minute()) }
 }
 
 /// Uhrzeit bzw. Zeitspanne eines Termins für die Slide.

@@ -3076,6 +3076,7 @@ dependencies = [
  "slidebear-pptx",
  "slidebear-render",
  "tiny-skia",
+ "ttf-parser 0.21.1",
  "uuid",
 ]
 

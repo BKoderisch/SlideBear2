@@ -10,9 +10,8 @@ use crate::event::EventFields;
 use crate::scene::{ElementKind, Scene};
 
 static DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b").unwrap());
-static TIME_RANGE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(\d{1,2})(?::(\d{2}))?\s*(?:-|–|bis)\s*(\d{1,2})(?::(\d{2}))?\s*Uhr\b").unwrap()
-});
+static TIME_RANGE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b(\d{1,2})(?::(\d{2}))?\s*(?:-|–|bis)\s*(\d{1,2})(?::(\d{2}))?\s*Uhr\b").unwrap());
 static TIME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(\d{1,2})(?::(\d{2}))?\s*Uhr\b").unwrap());
 
 #[derive(Debug, Clone, PartialEq)]
@@ -56,9 +55,10 @@ impl Detection {
     pub fn apply(&self, scene: &mut Scene) {
         for r in &self.replacements {
             if let Some(el) = scene.element_mut(r.element_id)
-                && let ElementKind::Text(t) = &mut el.kind {
-                    t.text = r.after.clone();
-                }
+                && let ElementKind::Text(t) = &mut el.kind
+            {
+                t.text = r.after.clone();
+            }
         }
     }
 }
@@ -86,14 +86,15 @@ pub fn detect(scene: &Scene) -> Detection {
             let (day, month, year) = (&c[1], &c[2], &c[3]);
             let full_year = if year.len() == 2 { format!("20{year}") } else { year.to_string() };
             if let (Ok(dd), Ok(mm), Ok(yy)) = (day.parse(), month.parse(), full_year.parse())
-                && let Some(date) = NaiveDate::from_ymd_opt(yy, mm, dd) {
-                    d.date.get_or_insert(date);
-                    let dpat = if day.len() == 1 { "%-d" } else { "%d" };
-                    let mpat = if month.len() == 1 { "%-m" } else { "%m" };
-                    let ypat = if year.len() == 2 { "%y" } else { "%Y" };
-                    d.date_pattern.get_or_insert(format!("{dpat}.{mpat}.{ypat}"));
-                    new = new.replacen(&c[0], "{datum}", 1);
-                }
+                && let Some(date) = NaiveDate::from_ymd_opt(yy, mm, dd)
+            {
+                d.date.get_or_insert(date);
+                let dpat = if day.len() == 1 { "%-d" } else { "%d" };
+                let mpat = if month.len() == 1 { "%-m" } else { "%m" };
+                let ypat = if year.len() == 2 { "%y" } else { "%Y" };
+                d.date_pattern.get_or_insert(format!("{dpat}.{mpat}.{ypat}"));
+                new = new.replacen(&c[0], "{datum}", 1);
+            }
         }
 
         if let Some(c) = TIME_RANGE.captures(&new) {
@@ -111,12 +112,13 @@ pub fn detect(scene: &Scene) -> Detection {
         if new.contains("{zeit}") && new.contains('|') {
             let parts: Vec<String> = new.split('|').map(|p| p.trim().to_string()).collect();
             if let Some(pos) = parts.iter().position(|p| p == "{zeit}")
-                && let Some(loc) = parts.get(pos + 1).filter(|p| !p.is_empty() && !p.contains('{')) {
-                    d.location = Some(loc.clone());
-                    let mut parts = parts.clone();
-                    parts[pos + 1] = "{ort}".into();
-                    new = parts.join(" | ");
-                }
+                && let Some(loc) = parts.get(pos + 1).filter(|p| !p.is_empty() && !p.contains('{'))
+            {
+                d.location = Some(loc.clone());
+                let mut parts = parts.clone();
+                parts[pos + 1] = "{ort}".into();
+                new = parts.join(" | ");
+            }
         }
 
         if new != *text {
@@ -126,11 +128,7 @@ pub fn detect(scene: &Scene) -> Detection {
     }
 
     // Titel: größter Text, der kein Datum/keine Zeit enthält
-    if let Some((id, text, _)) = texts
-        .iter()
-        .filter(|(id, _, _)| !date_or_time_ids.contains(id))
-        .max_by(|a, b| a.2.total_cmp(&b.2))
-    {
+    if let Some((id, text, _)) = texts.iter().filter(|(id, _, _)| !date_or_time_ids.contains(id)).max_by(|a, b| a.2.total_cmp(&b.2)) {
         d.title = Some(text.trim().to_string());
         d.replacements.push(Replacement { element_id: *id, before: text.clone(), after: "{titel}".into() });
     }

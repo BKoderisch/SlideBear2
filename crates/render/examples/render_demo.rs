@@ -2,7 +2,7 @@
 
 use chrono::NaiveDateTime;
 use slidebear_core::scene::{Color, Element, ElementKind, Rect, Shadow, ShapeKind, ShapeStyle};
-use slidebear_core::{presets, EventFields, placeholder};
+use slidebear_core::{EventFields, placeholder, presets};
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -26,11 +26,19 @@ fn main() -> anyhow::Result<()> {
         tpl.date_style.pattern = date.into();
         if bg.is_none() {
             // Ersatz-Hintergrund: dunkler Grund mit ein paar warmen Lichtpunkten
-            let mut els = vec![Element::new("bg", Rect::new(0.0, 0.0, 1920.0, 1080.0), ElementKind::Shape(ShapeStyle { shape: ShapeKind::Rect, fill: Some(Color::rgb(28, 26, 24)), stroke: None }))];
+            let mut els = vec![Element::new(
+                "bg",
+                Rect::new(0.0, 0.0, 1920.0, 1080.0),
+                ElementKind::Shape(ShapeStyle { shape: ShapeKind::Rect, fill: Some(Color::rgb(28, 26, 24)), stroke: None }),
+            )];
             for k in 0..14 {
                 let x = (k * 173 % 1800) as f32;
                 let y = (k * 311 % 1000) as f32;
-                els.push(Element::new("dot", Rect::new(x, y, 70.0, 70.0), ElementKind::Shape(ShapeStyle { shape: ShapeKind::Ellipse, fill: Some(Color::rgba(240, 160, 40, 140)), stroke: None })));
+                els.push(Element::new(
+                    "dot",
+                    Rect::new(x, y, 70.0, 70.0),
+                    ElementKind::Shape(ShapeStyle { shape: ShapeKind::Ellipse, fill: Some(Color::rgba(240, 160, 40, 140)), stroke: None }),
+                ));
             }
             els.append(&mut tpl.scene.elements);
             tpl.scene.elements = els;

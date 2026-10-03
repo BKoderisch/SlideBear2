@@ -59,11 +59,8 @@ pub fn merge(
             }
             None => {
                 let mut e = Event::manual(r.fields.clone(), None);
-                e.source = EventSource::ChurchTools {
-                    appointment_id: r.appointment_id,
-                    calendar_id: r.calendar_id,
-                    occurrence: r.occurrence,
-                };
+                e.source =
+                    EventSource::ChurchTools { appointment_id: r.appointment_id, calendar_id: r.calendar_id, occurrence: r.occurrence };
                 e.overrides = FieldOverrides::default();
                 if let Some(s) = Series::find(series, &e) {
                     if e.base.subtitle.is_empty() {
@@ -96,7 +93,7 @@ pub fn merge(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{slide_for, Slide, Template};
+    use crate::event::{Slide, Template, slide_for};
     use crate::scene::Scene;
 
     fn dt(s: &str) -> NaiveDateTime {
@@ -128,7 +125,11 @@ mod tests {
         s.default_subtitle = "Alle sind willkommen".into();
         let series = vec![s];
         let mut events = Vec::new();
-        let r = [remote(10, "2026-10-07 19:00", "Gebetsabend"), remote(10, "2026-10-14 19:00", "Gebetsabend"), remote(99, "2026-10-08 19:00", "Sonstiges")];
+        let r = [
+            remote(10, "2026-10-07 19:00", "Gebetsabend"),
+            remote(10, "2026-10-14 19:00", "Gebetsabend"),
+            remote(99, "2026-10-08 19:00", "Sonstiges"),
+        ];
         let rep = merge(&mut events, &r, &series, &[1], dt(FROM), dt(TO));
         assert_eq!(rep.added, 3);
         assert!(events.iter().all(|e| e.enabled && e.slide.is_none()));

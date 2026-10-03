@@ -3,8 +3,8 @@
 use chrono::{Datelike, Duration, Local, NaiveDateTime, NaiveTime};
 use eframe::egui::{self, RichText};
 use slidebear_churchtools::Calendar;
-use slidebear_core::export::{group_key, GroupKey};
-use slidebear_core::series_edit::{apply_to_all, reset_all, Field};
+use slidebear_core::export::{GroupKey, group_key};
+use slidebear_core::series_edit::{Field, apply_to_all, reset_all};
 use slidebear_core::{Event, EventFields, Series, Slide};
 use slidebear_render::Renderer;
 use uuid::Uuid;
@@ -47,6 +47,9 @@ pub struct App {
     pub quick: crate::quick::QuickState,
     /// Ob Änderungen an Serienterminen nur für diesen oder für alle Termine gelten.
     pub edit_scope: EditScope,
+    /// Vornamen vom Präsentationsdienst am nächsten Sonntag (für die Begrüßung).
+    pub greet_names: Vec<String>,
+    pub confetti: crate::confetti::Confetti,
 }
 
 impl App {
@@ -77,6 +80,8 @@ impl App {
             confirm_delete_template: None,
             quick: crate::quick::QuickState::new(quick_days),
             edit_scope: EditScope::This,
+            greet_names: Vec::new(),
+            confetti: Default::default(),
         };
         if app.store.data.templates.is_empty() {
             app.store.data.templates.push(slidebear_core::presets::event_template("Standard", None));
@@ -86,6 +91,7 @@ impl App {
         if s.sync_on_start && app.can_sync() {
             app.start_sync(&cc.egui_ctx);
         }
+        app.check_presenter(&cc.egui_ctx, false);
         app
     }
 
@@ -102,6 +108,15 @@ impl App {
     pub fn can_sync(&self) -> bool {
         let s = &self.store.data.settings;
         !s.ct_url.trim().is_empty() && !self.token.trim().is_empty() && !s.calendars.is_empty()
+    }
+
+    /// Fragt in ChurchTools nach, wer am nächsten Sonntag den Begrüßungs-Dienst hat.
+    pub fn check_presenter(&mut self, ctx: &egui::Context, manual: bool) {
+        let s = &self.store.data.settings;
+        if s.ct_url.trim().is_empty() || self.token.trim().is_empty() || s.greet_service.trim().is_empty() {
+            return;
+        }
+        self.jobs.presenter(ctx, s.ct_url.clone(), self.token.clone(), s.greet_service.clone(), manual);
     }
 
     pub fn start_sync(&mut self, ctx: &egui::Context) {
@@ -128,7 +143,9 @@ impl App {
     pub fn open_editor(&mut self, target: EditTarget) {
         let d = &self.store.data;
         let slide = match target {
-            EditTarget::Template(id) => d.template(id).map(|t| Slide { scene: t.scene.clone(), date_style: t.date_style.clone(), time_style: t.time_style.clone() }),
+            EditTarget::Template(id) => {
+                d.template(id).map(|t| Slide { scene: t.scene.clone(), date_style: t.date_style.clone(), time_style: t.time_style.clone() })
+            }
             EditTarget::Series(id) => d.series(id).and_then(|s| s.slide.clone()),
             EditTarget::Event(id) => d.event(id).and_then(|e| e.slide.clone()),
         };
@@ -172,7 +189,9 @@ impl App {
         if let Some(s) = Series::find(&self.store.data.series, e) {
             return Some(s.id);
         }
-        let slidebear_core::EventSource::ChurchTools { calendar_id, appointment_id, .. } = e.source else { return None };
+        let slidebear_core::EventSource::ChurchTools { calendar_id, appointment_id, .. } = e.source else {
+            return None;
+        };
         let s = Series::new(calendar_id, appointment_id, &e.base.title, None);
         let id = s.id;
         self.store.data.series.push(s);
@@ -182,13 +201,15 @@ impl App {
     /// Blendet die Veranstaltung eines ChurchTools-Termins aus (alle Termine, auch künftige).
     pub fn set_hidden(&mut self, e: &Event, hidden: bool) {
         let title = e.base.title.clone();
-        let Some(sid) = self.ensure_series(e) else { return };
+        let Some(sid) = self.ensure_series(e) else {
+            return;
+        };
         if let Some(s) = self.store.data.series_mut(sid) {
             s.hidden = hidden;
         }
         self.store.mark_dirty();
         if hidden {
-            self.info(format!("„{title}“ ausgeblendet. Unter Einstellungen → Ausgeblendete Termine wieder einblendbar."));
+            self.info(format!("„{title}“ ausgeblendet. Unter Einstellungen › Ausgeblendete Termine wieder einblendbar."));
         } else {
             self.info(format!("„{title}“ wird wieder angezeigt."));
         }
@@ -197,11 +218,17 @@ impl App {
     /// Übernimmt eine bearbeitete Kopie eines Termins. Bei „alle Termine“ werden die geänderten
     /// Felder (außer dem Datum) auf die ganze Serie übertragen.
     pub fn commit_event(&mut self, edited: Event) {
-        let Some(before) = self.store.data.event(edited.id).map(|e| e.fields()) else { return };
+        self.commit_event_scoped(edited, self.edit_scope);
+    }
+
+    pub fn commit_event_scoped(&mut self, edited: Event, scope: EditScope) {
+        let Some(before) = self.store.data.event(edited.id).map(|e| e.fields()) else {
+            return;
+        };
         if let Some(target) = self.store.data.event_mut(edited.id) {
             *target = edited.clone();
         }
-        if self.edit_scope == EditScope::All
+        if scope == EditScope::All
             && let Some(sid) = self.ensure_series(&edited)
         {
             let d = &mut self.store.data;
@@ -216,7 +243,9 @@ impl App {
 
     /// Setzt ein Feld auf den ChurchTools-Wert zurück, je nach Umschalter für diesen oder alle Termine.
     pub fn reset_field(&mut self, id: Uuid, field: Field) {
-        let Some(e) = self.store.data.event(id).cloned() else { return };
+        let Some(e) = self.store.data.event(id).cloned() else {
+            return;
+        };
         let series_idx = Series::find(&self.store.data.series, &e).and_then(|s| self.store.data.series.iter().position(|x| x.id == s.id));
         match (self.edit_scope, series_idx) {
             (EditScope::All, Some(idx)) => {
@@ -246,10 +275,19 @@ impl App {
 
     /// Legt eine neue Slide als Kopie des Layouts an (ersetzt eine vorhandene) und öffnet den Editor.
     pub fn new_slide(&mut self, owner: &SlideOwner, layout: Uuid) {
-        let Some(slide) = self.store.data.template(layout).map(Slide::from_layout) else { return };
+        let Some(slide) = self.store.data.template(layout).map(Slide::from_layout) else {
+            return;
+        };
+        self.set_slide(owner, slide);
+    }
+
+    /// Setzt die Slide eines Termins bzw. einer Serie (ersetzt eine vorhandene) und öffnet den Editor.
+    pub fn set_slide(&mut self, owner: &SlideOwner, slide: Slide) {
         let target = match owner {
             SlideOwner::Series(id) => {
-                let Some(s) = self.store.data.series_mut(*id) else { return };
+                let Some(s) = self.store.data.series_mut(*id) else {
+                    return;
+                };
                 s.slide = Some(slide);
                 EditTarget::Series(*id)
             }
@@ -260,7 +298,9 @@ impl App {
                 EditTarget::Series(id)
             }
             SlideOwner::Event(id) => {
-                let Some(e) = self.store.data.event_mut(*id) else { return };
+                let Some(e) = self.store.data.event_mut(*id) else {
+                    return;
+                };
                 e.slide = Some(slide);
                 EditTarget::Event(*id)
             }
@@ -305,6 +345,21 @@ impl App {
                     }
                     Err(e) => self.error(format!("Kalender laden fehlgeschlagen: {e}")),
                 },
+                JobResult::Presenter { result, manual } => match result {
+                    Ok(report) => {
+                        if manual {
+                            if report.names.is_empty() {
+                                self.error(format!("Niemand gefunden. {}", report.diagnosis));
+                            } else {
+                                self.info(format!("Eingeteilt: {}", crate::jobs::join_names(&report.names)));
+                            }
+                        }
+                        self.greet_names = report.names;
+                    }
+                    // Beim Start still bleiben, nur auf Knopfdruck melden
+                    Err(e) if manual => self.error(format!("Dienstplan nicht lesbar: {e}")),
+                    Err(_) => {}
+                },
                 JobResult::Whoami(r) => match r {
                     Ok(name) => {
                         self.info(format!("Verbunden als {name}"));
@@ -318,21 +373,33 @@ impl App {
     }
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
-        let frame = egui::Frame::new().fill(theme::SNOW).inner_margin(egui::Margin::symmetric(14, 10)).stroke(egui::Stroke::new(3.0, theme::INK));
+        let frame =
+            egui::Frame::new().fill(theme::SNOW).inner_margin(egui::Margin::symmetric(14, 10)).stroke(egui::Stroke::new(3.0, theme::INK));
         egui::Panel::top("top").frame(frame).show(ui, |ui| {
             theme::snowflakes(ui, ui.max_rect());
             ui.horizontal(|ui| {
-                theme::bear_logo(ui, 52.0);
+                let bear = theme::bear_logo(ui, 52.0);
+                if bear.clicked() {
+                    self.confetti.burst(bear.rect.center());
+                }
                 theme::comic_title(ui, "SlideBear", 34.0);
                 ui.add_space(12.0);
-                for (v, label) in [(View::Quick, "⚡ Schnellexport"), (View::Events, "📅 Termine"), (View::Templates, "🎨 Layouts"), (View::Settings, "⚙ Einstellungen")] {
+                for (v, label) in [
+                    (View::Quick, "⚡ Schnellexport"),
+                    (View::Events, "📅 Termine"),
+                    (View::Templates, "🎨 Layouts"),
+                    (View::Settings, "⚙ Einstellungen"),
+                ] {
                     if ui.selectable_label(self.view == v, label).clicked() {
                         self.view = v;
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let export = egui::Button::new(RichText::new("⬆ Exportieren").color(theme::SNOW)).fill(theme::GLACIER);
-                    if theme::comic_button(ui, export).on_hover_text("Alle anstehenden Slides als PNG in den Export-Ordner schreiben").clicked() {
+                    if theme::comic_button(ui, export)
+                        .on_hover_text("Alle anstehenden Slides als PNG in den Export-Ordner schreiben")
+                        .clicked()
+                    {
                         self.export_now();
                     }
                     ui.add_space(4.0);
@@ -350,13 +417,27 @@ impl App {
         });
     }
 
+    /// PPTX wählen und eine Folie daraus als Slide dieses Termins bzw. dieser Serie übernehmen.
+    pub fn pick_pptx_for(&mut self, owner: SlideOwner, title: String, fields: EventFields) {
+        let Some(path) = rfd::FileDialog::new().add_filter("PowerPoint", &["pptx"]).pick_file() else {
+            return;
+        };
+        match ImportDialog::open(&path, &self.store) {
+            Ok(d) => self.import = Some(d.for_target(owner, title, fields)),
+            Err(e) => self.error(format!("Import fehlgeschlagen: {e}")),
+        }
+    }
+
     pub fn pick_pptx(&mut self) {
-        let Some(path) = rfd::FileDialog::new().add_filter("PowerPoint", &["pptx"]).pick_file() else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("PowerPoint", &["pptx"]).pick_file() else {
+            return;
+        };
         match ImportDialog::open(&path, &self.store) {
             Ok(d) => {
                 if !d.missing_fonts.is_empty() {
                     let fonts = &self.font_families;
-                    let missing: Vec<_> = d.missing_fonts.iter().filter(|f| !fonts.iter().any(|g| g.eq_ignore_ascii_case(f))).cloned().collect();
+                    let missing: Vec<_> =
+                        d.missing_fonts.iter().filter(|f| !fonts.iter().any(|g| g.eq_ignore_ascii_case(f))).cloned().collect();
                     if !missing.is_empty() {
                         self.info(format!("Nicht installierte Schriften werden durch Roboto ersetzt: {}", missing.join(", ")));
                     }
@@ -369,25 +450,38 @@ impl App {
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         // Statuszeile als Comic-Sprechblase des Eisbären
-        egui::Panel::bottom("status").frame(egui::Frame::new().fill(theme::ICE).inner_margin(egui::Margin::symmetric(12, 8))).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                theme::bear_logo(ui, 30.0);
-                let bubble = egui::Frame::new()
-                    .fill(if self.status_error { theme::BADGE_CANCELLED } else { theme::SNOW })
-                    .stroke(egui::Stroke::new(2.5, theme::INK))
-                    .corner_radius(egui::CornerRadius::same(16))
-                    .inner_margin(egui::Margin::symmetric(12, 4));
-                bubble.show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        if self.jobs.running > 0 {
-                            ui.spinner();
-                        }
-                        let text = if self.status.is_empty() { "Hallo! Alles bereit für Sonntag." } else { self.status.as_str() };
-                        ui.label(RichText::new(text).color(theme::INK));
+        egui::Panel::bottom("status")
+            .frame(egui::Frame::new().fill(theme::ICE).inner_margin(egui::Margin { left: 12, right: 12, top: 8, bottom: 12 }))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let bear_resp = theme::bear_logo(ui, 40.0);
+                    if bear_resp.clicked() {
+                        self.confetti.burst(bear_resp.rect.center());
+                    }
+                    let bear = bear_resp.rect;
+                    // Rechte Wange des Bären auf Höhe des Mauls (Kopfkontur liegt dort bei ca. 86 % der Breite)
+                    let mouth = egui::pos2(bear.left() + bear.width() * 0.88, bear.top() + bear.height() * 0.72);
+                    let fill = if self.status_error { theme::BADGE_CANCELLED } else { theme::SNOW };
+                    theme::speech_bubble(ui, fill, mouth, |ui| {
+                        ui.horizontal(|ui| {
+                            if self.jobs.running > 0 {
+                                ui.spinner();
+                            }
+                            if !self.greet_names.is_empty() {
+                                let names = crate::jobs::join_names(&self.greet_names);
+                                ui.label(RichText::new(format!("Hallo {names}!")).color(theme::INK).family(theme::bold()));
+                            }
+                            let text = match (self.status.is_empty(), self.greet_names.len()) {
+                                (false, _) => self.status.clone(),
+                                (true, 0) => "Hallo! Alles bereit für Sonntag.".to_string(),
+                                (true, 1) => "Schön, dass du am Sonntag Präsentationsdienst hast. Alles bereit!".to_string(),
+                                (true, _) => "Schön, dass ihr am Sonntag Präsentationsdienst habt. Alles bereit!".to_string(),
+                            };
+                            ui.label(RichText::new(text).color(theme::INK));
+                        });
                     });
                 });
             });
-        });
     }
 }
 
@@ -420,9 +514,12 @@ impl eframe::App for App {
         }
 
         if let Some(mut dialog) = self.import.take()
-            && dialog.show(&ctx, self) {
-                self.import = Some(dialog);
-            }
+            && dialog.show(&ctx, self)
+        {
+            self.import = Some(dialog);
+        }
+
+        self.confetti.show(&ctx);
 
         if let Err(e) = self.store.autosave() {
             self.error(format!("Speichern fehlgeschlagen: {e}"));
@@ -480,15 +577,20 @@ pub fn scope_toggle(ui: &mut egui::Ui, scope: &mut EditScope, this_label: &str) 
 pub enum SlideOwner {
     Series(Uuid),
     /// ChurchTools-Termin ohne Serie: beim Anlegen der Slide entsteht die Serie.
-    Appointment { calendar_id: i64, appointment_id: i64, title: String },
+    Appointment {
+        calendar_id: i64,
+        appointment_id: i64,
+        title: String,
+    },
     Event(Uuid),
 }
 
 /// Buttons „Slide bearbeiten“ und „Neue Slide aus Layout“. Liefert `true`, wenn etwas geöffnet wurde.
-pub fn slide_buttons(ui: &mut egui::Ui, app: &mut App, owner: &SlideOwner) -> bool {
+pub fn slide_buttons(ui: &mut egui::Ui, app: &mut App, owner: &SlideOwner, event: &Event) -> bool {
     let layouts: Vec<(Uuid, String)> = app.store.data.templates.iter().map(|t| (t.id, t.name.clone())).collect();
     let has = app.has_slide(owner);
     let mut chosen = None;
+    let mut from_pptx = false;
     let mut edit = false;
     if has {
         edit = ui.button("✏ Bearbeiten").on_hover_text("Slide im Editor öffnen").clicked();
@@ -502,12 +604,20 @@ pub fn slide_buttons(ui: &mut egui::Ui, app: &mut App, owner: &SlideOwner) -> bo
                 ui.close();
             }
         }
+        ui.separator();
+        if ui.button("📥 Aus PPTX …").on_hover_text("Eine Folie aus einer PowerPoint-Datei als Slide übernehmen").clicked() {
+            from_pptx = true;
+            ui.close();
+        }
     });
+    if from_pptx {
+        app.pick_pptx_for(owner.clone(), event.fields().title, event.fields());
+    }
     if edit {
         app.edit_slide(owner);
     }
     if let Some(layout) = chosen {
         app.new_slide(owner, layout);
     }
-    edit || chosen.is_some()
+    edit || chosen.is_some() || from_pptx
 }

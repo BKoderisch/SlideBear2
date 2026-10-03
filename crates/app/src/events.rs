@@ -3,12 +3,12 @@
 use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime};
 use eframe::egui::{self, Color32, RichText, Vec2};
 use slidebear_core::export::{file_name, plan};
-use slidebear_core::format::{format_date, format_time, DateStyle, TimeStyle};
+use slidebear_core::format::{DateStyle, TimeStyle, format_date, format_time};
 use slidebear_core::series_edit::Field;
-use slidebear_core::{is_hidden, placeholder, slide_for, Event, EventStatus, Series};
+use slidebear_core::{Event, EventStatus, Series, is_hidden, placeholder, slide_for};
 use uuid::Uuid;
 
-use crate::app::{slide_buttons, App, SlideOwner};
+use crate::app::{App, SlideOwner, slide_buttons};
 use crate::theme::{self, badge};
 
 /// Eingabepuffer für die Detailfelder (Datum/Uhrzeit als Text, bis sie gültig sind).
@@ -43,7 +43,9 @@ impl EventForm {
 /// Übernimmt Datum, Beginn und Ende aus Texteingaben. Leerer Beginn = ganztags, leeres Ende = offen.
 /// Liefert `false`, solange die Eingabe (noch) ungültig ist; der Termin bleibt dann unverändert.
 pub(crate) fn apply_datetime(ev: &mut Event, date: &str, start: &str, end: &str) -> bool {
-    let Some(date) = parse_date(date) else { return false };
+    let Some(date) = parse_date(date) else {
+        return false;
+    };
     let from_ct = ev.is_from_churchtools();
     let start_t = parse_time(start);
     let all_day = start.trim().is_empty();
@@ -136,7 +138,8 @@ fn list(ui: &mut egui::Ui, app: &mut App) {
         return;
     }
 
-    let planned: Vec<Uuid> = plan(&data.events, &data.series, &data.settings.hide_rules, today, data.settings.export_days).iter().map(|p| p.event.id).collect();
+    let planned: Vec<Uuid> =
+        plan(&data.events, &data.series, &data.settings.hide_rules, today, data.settings.export_days).iter().map(|p| p.event.id).collect();
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
         let mut last_week = None;
         for (id, start) in ids {
@@ -146,7 +149,11 @@ fn list(ui: &mut egui::Ui, app: &mut App) {
                 let monday = NaiveDate::from_isoywd_opt(week.year(), week.week(), chrono::Weekday::Mon).unwrap_or(start.date());
                 let sunday = monday + chrono::Duration::days(6);
                 ui.add_space(6.0);
-                ui.label(RichText::new(format!("KW {} · {} - {}", week.week(), monday.format("%d.%m."), sunday.format("%d.%m.%Y"))).strong().weak());
+                ui.label(
+                    RichText::new(format!("KW {} · {} - {}", week.week(), monday.format("%d.%m."), sunday.format("%d.%m.%Y")))
+                        .strong()
+                        .weak(),
+                );
             }
             row(ui, app, id, planned.contains(&id));
         }
@@ -154,7 +161,9 @@ fn list(ui: &mut egui::Ui, app: &mut App) {
 }
 
 fn row(ui: &mut egui::Ui, app: &mut App, id: Uuid, planned: bool) {
-    let Some(e) = app.store.data.event(id).cloned() else { return };
+    let Some(e) = app.store.data.event(id).cloned() else {
+        return;
+    };
     let f = e.fields();
     let series = app.store.data.series.clone();
     let slide = slide_for(&e, &series);
@@ -177,7 +186,13 @@ fn row(ui: &mut egui::Ui, app: &mut App, id: Uuid, planned: bool) {
                     None => {
                         let (r, _) = ui.allocate_exact_size(thumb, egui::Sense::hover());
                         ui.painter().rect_filled(r, 8.0, ui.visuals().faint_bg_color);
-                        ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, "keine Slide", egui::FontId::proportional(13.0), ui.visuals().weak_text_color());
+                        ui.painter().text(
+                            r.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "keine Slide",
+                            egui::FontId::proportional(13.0),
+                            ui.visuals().weak_text_color(),
+                        );
                     }
                 }
                 ui.vertical(|ui| {
@@ -185,7 +200,11 @@ fn row(ui: &mut egui::Ui, app: &mut App, id: Uuid, planned: bool) {
                     ui.label(if e.status == EventStatus::Cancelled { title.strikethrough() } else { title });
                     let time = format_time(&f, &ts);
                     let weekday = slidebear_core::format::weekday_de(f.start.date()).get(..2).unwrap_or("").to_string();
-                    ui.label(format!("{weekday} {}{}", format_date(&f, &ds), if time.is_empty() { String::new() } else { format!(" · {time}") }));
+                    ui.label(format!(
+                        "{weekday} {}{}",
+                        format_date(&f, &ds),
+                        if time.is_empty() { String::new() } else { format!(" · {time}") }
+                    ));
                     ui.horizontal_wrapped(|ui| {
                         if in_series {
                             badge(ui, "Serie", theme::BADGE_CT);
@@ -238,7 +257,9 @@ fn detail(ui: &mut egui::Ui, app: &mut App, id: Uuid) {
     {
         app.event_form.load(e);
     }
-    let Some(e) = app.store.data.event(id).cloned() else { return };
+    let Some(e) = app.store.data.event(id).cloned() else {
+        return;
+    };
     let series = app.store.data.series.clone();
     let (ds, ts) = styles(&e, &series);
     let owner = app.owner_of(&e);
@@ -261,28 +282,40 @@ fn detail(ui: &mut egui::Ui, app: &mut App, id: Uuid) {
             None => {
                 let (r, _) = ui.allocate_exact_size(size, egui::Sense::hover());
                 ui.painter().rect_filled(r, 12.0, ui.visuals().faint_bg_color);
-                ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, "Noch keine Slide: „➕ Slide anlegen“", egui::FontId::proportional(20.0), ui.visuals().weak_text_color());
+                ui.painter().text(
+                    r.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "Noch keine Slide: „➕ Slide anlegen“",
+                    egui::FontId::proportional(20.0),
+                    ui.visuals().weak_text_color(),
+                );
             }
         }
         ui.add_space(8.0);
 
         ui.horizontal(|ui| {
             ui.label(RichText::new("Slide").strong());
-            slide_buttons(ui, app, &owner);
+            slide_buttons(ui, app, &owner, &e);
             if let Some(slide) = slide_for(&e, &series)
                 && ui.button("💾 PNG speichern …").clicked()
-                && let Some(path) = rfd::FileDialog::new().set_file_name(file_name(&f)).add_filter("PNG", &["png"]).save_file() {
-                    let pm = app.renderer.render(slide.scene, &|s| placeholder::resolve(s, &f, slide));
-                    match slidebear_render::save_png(&pm, &path) {
-                        Ok(()) => app.info(format!("Gespeichert: {}", path.display())),
-                        Err(err) => app.error(format!("Speichern fehlgeschlagen: {err}")),
-                    }
+                && let Some(path) = rfd::FileDialog::new().set_file_name(file_name(&f)).add_filter("PNG", &["png"]).save_file()
+            {
+                let pm = app.renderer.render(slide.scene, &|s| placeholder::resolve(s, &f, slide));
+                match slidebear_render::save_png(&pm, &path) {
+                    Ok(()) => app.info(format!("Gespeichert: {}", path.display())),
+                    Err(err) => app.error(format!("Speichern fehlgeschlagen: {err}")),
                 }
+            }
         });
         match &owner {
             SlideOwner::Series(sid) => {
                 let title = series.iter().find(|s| s.id == *sid).map(|s| s.title.clone()).unwrap_or_default();
-                ui.label(RichText::new(format!("🔁 Eine Slide für alle Termine von „{title}“. Datum und Uhrzeit kommen automatisch vom jeweiligen Termin.")).weak());
+                ui.label(
+                    RichText::new(format!(
+                        "🔁 Eine Slide für alle Termine von „{title}“. Datum und Uhrzeit kommen automatisch vom jeweiligen Termin."
+                    ))
+                    .weak(),
+                );
             }
             SlideOwner::Appointment { .. } => {
                 ui.label(RichText::new("🔁 Eine hier angelegte Slide gilt automatisch für alle Termine dieser Reihe.").weak());
@@ -325,7 +358,13 @@ fn detail(ui: &mut egui::Ui, app: &mut App, id: Uuid) {
             ui.label("Datum");
             ui.horizontal(|ui| {
                 let date_ok = parse_date(&form.date).is_some();
-                let r1 = theme::text_field(ui, egui::TextEdit::singleline(&mut form.date).hint_text("TT.MM.JJJJ").text_color_opt((!date_ok).then_some(theme::CANCELLED_TEXT)), 140.0);
+                let r1 = theme::text_field(
+                    ui,
+                    egui::TextEdit::singleline(&mut form.date)
+                        .hint_text("TT.MM.JJJJ")
+                        .text_color_opt((!date_ok).then_some(theme::CANCELLED_TEXT)),
+                    140.0,
+                );
                 ui.label("von");
                 let r2 = theme::text_field(ui, egui::TextEdit::singleline(&mut form.start).hint_text("ganztags"), 110.0);
                 ui.label("bis");
@@ -362,7 +401,11 @@ fn detail(ui: &mut egui::Ui, app: &mut App, id: Uuid) {
             ui.end_row();
 
             ui.label("Export");
-            let label = if matches!(owner, SlideOwner::Series(_)) { "Diesen Termin berücksichtigen (aus = überspringen)" } else { "Slide exportieren" };
+            let label = if matches!(owner, SlideOwner::Series(_)) {
+                "Diesen Termin berücksichtigen (aus = überspringen)"
+            } else {
+                "Slide exportieren"
+            };
             if ui.checkbox(&mut ev.enabled, label).changed() {
                 changed = true;
             }
@@ -385,8 +428,12 @@ fn detail(ui: &mut egui::Ui, app: &mut App, id: Uuid) {
                     app.set_hidden(&e, false);
                 }
             } else if is_hidden(&e, &app.store.data.series, &app.store.data.settings.hide_rules) {
-                ui.label(RichText::new("Ausgeblendet durch einen Titel-Filter (Einstellungen → Ausgeblendete Termine).").weak());
-            } else if ui.button("Veranstaltung ausblenden").on_hover_text("Alle Termine dieser Veranstaltung ausblenden, auch künftige").clicked() {
+                ui.label(RichText::new("Ausgeblendet durch einen Titel-Filter (Einstellungen › Ausgeblendete Termine).").weak());
+            } else if ui
+                .button("Veranstaltung ausblenden")
+                .on_hover_text("Alle Termine dieser Veranstaltung ausblenden, auch künftige")
+                .clicked()
+            {
                 app.set_hidden(&e, true);
                 app.selected_event = None;
             }

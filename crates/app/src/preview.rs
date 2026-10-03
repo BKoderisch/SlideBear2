@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
 use slidebear_core::assets::content_hash;
-use slidebear_core::{placeholder, EventFields, SlideRef};
-use slidebear_render::{to_rgba, Renderer};
+use slidebear_core::{EventFields, SlideRef, placeholder};
+use slidebear_render::{Renderer, to_rgba};
 
 /// Obergrenze für gecachte Texturen (Pixel), danach wird der Cache geleert.
 const MAX_PIXELS: usize = 60_000_000;
@@ -44,7 +44,14 @@ fn quantize(slide: SlideRef, width_px: f32) -> f32 {
 
 impl Previews {
     /// Textur für Slide + Termindaten in der gewünschten Breite (in Pixeln).
-    pub fn get(&mut self, ctx: &egui::Context, renderer: &mut Renderer, slide: SlideRef, fields: &EventFields, width_px: f32) -> TextureHandle {
+    pub fn get(
+        &mut self,
+        ctx: &egui::Context,
+        renderer: &mut Renderer,
+        slide: SlideRef,
+        fields: &EventFields,
+        width_px: f32,
+    ) -> TextureHandle {
         let scale = quantize(slide, width_px);
         let key = key_for(slide, fields, scale);
         if let Some(t) = self.cache.get(&key) {

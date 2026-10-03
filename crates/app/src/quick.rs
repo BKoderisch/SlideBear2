@@ -5,12 +5,12 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{Duration, Local, NaiveDate};
 use eframe::egui::{self, RichText, Vec2};
-use slidebear_core::export::{group_key, groups, plan, GroupKey};
+use slidebear_core::export::{GroupKey, group_key, groups, plan};
 use slidebear_core::format::weekday_de;
-use slidebear_core::{slide_for, Event, EventStatus, SlideRef};
+use slidebear_core::{Event, EventStatus, SlideRef, slide_for};
 use uuid::Uuid;
 
-use crate::app::{slide_buttons, App};
+use crate::app::{App, EditScope, slide_buttons};
 use crate::events::{apply_datetime, parse_date, parse_time, set_title};
 use crate::theme;
 
@@ -62,8 +62,12 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
     // Was ein Export jetzt tatsächlich schreiben würde, und die Zeilen (eine pro Veranstaltung)
     let (planned, rows): (HashSet<Uuid>, Vec<Row>) = {
         let d = &app.store.data;
-        let planned = plan(&d.events, &d.series, &d.settings.hide_rules, today, d.settings.export_days).iter().map(|p| p.event.id).collect();
-        let rows = groups(&d.events, &d.series, &d.settings.hide_rules, today, horizon).iter().map(|g| Row { key: g.key, next: g.next.id, more: g.more }).collect();
+        let planned =
+            plan(&d.events, &d.series, &d.settings.hide_rules, today, d.settings.export_days).iter().map(|p| p.event.id).collect();
+        let rows = groups(&d.events, &d.series, &d.settings.hide_rules, today, horizon)
+            .iter()
+            .map(|g| Row { key: g.key, next: g.next.id, more: g.more })
+            .collect();
         (planned, rows)
     };
 
@@ -84,8 +88,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
                 crate::events::new_manual(app);
             }
         });
-        ui.add_space(4.0);
-        crate::app::scope_toggle(ui, &mut app.edit_scope, "nur den angezeigten Termin");
+
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             let n = planned.len();
@@ -167,7 +170,9 @@ fn set_all(app: &mut App, rows: &[Row], on: bool) {
 
 fn row(ui: &mut egui::Ui, app: &mut App, r: Row, planned: bool, range: (NaiveDate, NaiveDate)) {
     let id = r.next;
-    let Some(mut ev) = app.store.data.event(id).cloned() else { return };
+    let Some(mut ev) = app.store.data.event(id).cloned() else {
+        return;
+    };
     let owner = app.owner_of(&ev);
     let cancelled = ev.status == EventStatus::Cancelled;
     let slide = slide_for(&ev, &app.store.data.series).map(|s| (s.scene.clone(), s.date_style.clone(), s.time_style.clone()));
@@ -228,11 +233,20 @@ fn row(ui: &mut egui::Ui, app: &mut App, r: Row, planned: bool, range: (NaiveDat
     let red = |ok: bool| (!ok).then_some(theme::CANCELLED_TEXT);
     let title_r = theme::text_field(ui, egui::TextEdit::singleline(&mut buf.title).id(ids[0]), 300.0);
     let date_ok = parse_date(&buf.date).is_some();
-    let date_r = theme::text_field(ui, egui::TextEdit::singleline(&mut buf.date).id(ids[1]).hint_text("TT.MM.JJJJ").text_color_opt(red(date_ok)), 140.0);
+    let date_r = theme::text_field(
+        ui,
+        egui::TextEdit::singleline(&mut buf.date).id(ids[1]).hint_text("TT.MM.JJJJ").text_color_opt(red(date_ok)),
+        140.0,
+    );
     let start_ok = buf.start.trim().is_empty() || parse_time(&buf.start).is_some();
-    let start_r = theme::text_field(ui, egui::TextEdit::singleline(&mut buf.start).id(ids[2]).hint_text("ganztags").text_color_opt(red(start_ok)), 110.0);
+    let start_r = theme::text_field(
+        ui,
+        egui::TextEdit::singleline(&mut buf.start).id(ids[2]).hint_text("ganztags").text_color_opt(red(start_ok)),
+        110.0,
+    );
     let end_ok = buf.end.trim().is_empty() || parse_time(&buf.end).is_some();
-    let end_r = theme::text_field(ui, egui::TextEdit::singleline(&mut buf.end).id(ids[3]).hint_text("offen").text_color_opt(red(end_ok)), 110.0);
+    let end_r =
+        theme::text_field(ui, egui::TextEdit::singleline(&mut buf.end).id(ids[3]).hint_text("offen").text_color_opt(red(end_ok)), 110.0);
 
     if title_r.changed() {
         set_title(&mut ev, buf.title.clone());
@@ -242,12 +256,13 @@ fn row(ui: &mut egui::Ui, app: &mut App, r: Row, planned: bool, range: (NaiveDat
         changed = true;
     }
     if changed {
-        app.commit_event(ev.clone());
+        // Im Schnellexport immer nur der angezeigte Termin; „alle Termine“ gibt es in den Termin-Details
+        app.commit_event_scoped(ev.clone(), EditScope::This);
     }
 
     // Slide bearbeiten oder neu anlegen
     ui.horizontal(|ui| {
-        slide_buttons(ui, app, &owner);
+        slide_buttons(ui, app, &owner, &ev);
     });
 
     // Status
@@ -261,7 +276,8 @@ fn row(ui: &mut egui::Ui, app: &mut App, r: Row, planned: bool, range: (NaiveDat
         } else if !on {
             ui.label(RichText::new("Export aus").weak());
         } else {
-            ui.label(RichText::new("noch nicht dran").weak()).on_hover_text("Liegt außerhalb des Vorlaufs (Einstellungen bzw. Veranstaltung)");
+            ui.label(RichText::new("noch nicht dran").weak())
+                .on_hover_text("Liegt außerhalb des Vorlaufs (Einstellungen bzw. Veranstaltung)");
         }
         if r.more > 0 {
             let dates = other_dates(app, r.key, id, range);
@@ -275,7 +291,11 @@ fn row(ui: &mut egui::Ui, app: &mut App, r: Row, planned: bool, range: (NaiveDat
         let mut hide = false;
         for resp in [thumb_resp, Some(title_r)].into_iter().flatten() {
             resp.context_menu(|ui| {
-                if ui.button("Veranstaltung ausblenden").on_hover_text("Alle Termine, auch künftige. Rückgängig unter Einstellungen.").clicked() {
+                if ui
+                    .button("Veranstaltung ausblenden")
+                    .on_hover_text("Alle Termine, auch künftige. Rückgängig unter Einstellungen.")
+                    .clicked()
+                {
                     hide = true;
                     ui.close();
                 }
@@ -298,7 +318,5 @@ fn other_dates(app: &App, key: GroupKey, except: Uuid, (from, to): (NaiveDate, N
         .filter(|s| s.date() >= from && s.date() <= to)
         .collect();
     list.sort();
-    list.iter()
-        .map(|s| format!("{} {}", weekday_de(s.date()).get(..2).unwrap_or(""), s.format("%d.%m. %H:%M")))
-        .collect()
+    list.iter().map(|s| format!("{} {}", weekday_de(s.date()).get(..2).unwrap_or(""), s.format("%d.%m. %H:%M"))).collect()
 }

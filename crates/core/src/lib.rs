@@ -11,5 +11,5 @@ pub mod series_edit;
 pub mod smart;
 pub mod sync;
 
-pub use event::{is_hidden, slide_for, Event, EventFields, EventSource, EventStatus, FieldOverrides, Series, Slide, SlideRef, Template};
+pub use event::{Event, EventFields, EventSource, EventStatus, FieldOverrides, Series, Slide, SlideRef, Template, is_hidden, slide_for};
 pub use scene::{Color, Element, ElementKind, Rect, Scene};

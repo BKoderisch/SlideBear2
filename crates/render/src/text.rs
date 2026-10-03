@@ -52,13 +52,8 @@ impl FontLibrary {
     }
 
     pub fn families(&self) -> Vec<String> {
-        let mut names: Vec<String> = self
-            .fs
-            .db()
-            .faces()
-            .filter_map(|f| f.families.first().map(|(n, _)| n.clone()))
-            .filter(|n| !n.starts_with('.'))
-            .collect();
+        let mut names: Vec<String> =
+            self.fs.db().faces().filter_map(|f| f.families.first().map(|(n, _)| n.clone())).filter(|n| !n.starts_with('.')).collect();
         names.sort_by_key(|n| n.to_lowercase());
         names.dedup();
         names
@@ -74,10 +69,8 @@ impl FontLibrary {
 
     fn shape(&mut self, text: &str, s: &TextStyle, size: f32, width: f32, wrap: Wrap) -> Buffer {
         let family = self.effective_family(&s.font_family);
-        let attrs = Attrs::new()
-            .family(Family::Name(family))
-            .weight(Weight(s.weight))
-            .style(if s.italic { Style::Italic } else { Style::Normal });
+        let attrs =
+            Attrs::new().family(Family::Name(family)).weight(Weight(s.weight)).style(if s.italic { Style::Italic } else { Style::Normal });
         let mut buf = Buffer::new(&mut self.fs, Metrics::new(size, size * s.line_height.max(0.5)));
         buf.set_wrap(&mut self.fs, wrap);
         buf.set_size(&mut self.fs, Some(width.max(1.0)), None);
@@ -128,9 +121,7 @@ impl FontLibrary {
         };
 
         let outline_w = s.outline.as_ref().map_or(0.0, |o| o.width * scale);
-        let shadow_ext = s.shadow.as_ref().map_or(0.0, |sh| {
-            sh.blur * scale * 3.0 + sh.offset_x.abs().max(sh.offset_y.abs()) * scale
-        });
+        let shadow_ext = s.shadow.as_ref().map_or(0.0, |sh| sh.blur * scale * 3.0 + sh.offset_x.abs().max(sh.offset_y.abs()) * scale);
         let pad = (layout.size_px * scale * 0.3 + outline_w + shadow_ext).ceil() as i32 + 2;
 
         let top = y_off.min(0.0);

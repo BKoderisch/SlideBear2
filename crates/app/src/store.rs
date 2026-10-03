@@ -24,6 +24,8 @@ pub struct Settings {
     pub ui_scale: f32,
     /// ChurchTools-Termine mit diesen Begriffen im Titel ausblenden.
     pub hide_rules: Vec<String>,
+    /// Dienst, dessen Mitarbeitende am Sonntag begrüßt werden (Teil des Dienstnamens).
+    pub greet_service: String,
 }
 
 impl Default for Settings {
@@ -38,6 +40,7 @@ impl Default for Settings {
             export_on_sync: false,
             ui_scale: 1.0,
             hide_rules: Vec::new(),
+            greet_service: DEFAULT_GREET_SERVICE.into(),
         }
     }
 }
@@ -85,6 +88,9 @@ pub struct Store {
     dirty_since: Option<Instant>,
 }
 
+/// Trifft „Präsi“ und „Präsentation“.
+pub const DEFAULT_GREET_SERVICE: &str = "Präs";
+
 const KEYRING_SERVICE: &str = "SlideBear";
 const KEYRING_USER: &str = "churchtools-token";
 
@@ -104,7 +110,12 @@ impl Store {
         } else {
             Data::default()
         };
-        let migrated = slidebear_core::event::migrate(&mut data.events, &mut data.series, &data.templates);
+        let mut migrated = slidebear_core::event::migrate(&mut data.events, &mut data.series, &data.templates);
+        // Früherer Standard „Präsentation“ fand den Dienst „Präsi“ nicht
+        if data.settings.greet_service == "Präsentation" {
+            data.settings.greet_service = DEFAULT_GREET_SERVICE.into();
+            migrated = true;
+        }
         let mut store = Self { root, data, dirty_since: None };
         if migrated {
             store.mark_dirty();
@@ -187,7 +198,9 @@ mod tests {
     /// Prüft die Migration an einer Kopie echter Daten: `SLIDEBEAR_MIGRATE_CHECK=/ordner cargo test`.
     #[test]
     fn migrate_real_copy() {
-        let Some(dir) = std::env::var_os("SLIDEBEAR_MIGRATE_CHECK") else { return };
+        let Some(dir) = std::env::var_os("SLIDEBEAR_MIGRATE_CHECK") else {
+            return;
+        };
         let mut store = Store::open(PathBuf::from(dir)).unwrap();
         let d = &store.data;
         let today = chrono::Local::now().date_naive();
@@ -197,7 +210,8 @@ mod tests {
         }
         let with_slide = d.events.iter().filter(|e| slidebear_core::slide_for(e, &d.series).is_some()).count();
         println!("events: {} mit Slide: {with_slide}", d.events.len());
-        let groups = slidebear_core::export::groups(&d.events, &d.series, &d.settings.hide_rules, today, today + chrono::Duration::days(60));
+        let groups =
+            slidebear_core::export::groups(&d.events, &d.series, &d.settings.hide_rules, today, today + chrono::Duration::days(60));
         for g in &groups {
             println!("  Zeile: {} {} (+{})", g.next.fields().title, g.next.fields().start, g.more);
         }

@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use uuid::Uuid;
 
-use crate::event::{is_hidden, slide_for, Event, EventFields, EventStatus, Series, SlideRef};
+use crate::event::{Event, EventFields, EventStatus, Series, SlideRef, is_hidden, slide_for};
 
 /// Dateiname-tauglich: `Gemeindeforum Süd!` → `gemeindeforum-sued`.
 pub fn slug(s: &str) -> String {
@@ -65,10 +65,8 @@ fn last_day(f: &EventFields) -> NaiveDate {
 /// nächste Termin exportiert (die Slide zeigt dessen Datum).
 /// Ausgeblendete Termine (siehe [`is_hidden`]) werden nie exportiert.
 pub fn plan<'a>(events: &'a [Event], series: &'a [Series], hide_rules: &[String], today: NaiveDate, default_days: u32) -> Vec<Planned<'a>> {
-    let mut sorted: Vec<&Event> = events
-        .iter()
-        .filter(|e| e.enabled && e.status == EventStatus::Active && !is_hidden(e, series, hide_rules))
-        .collect();
+    let mut sorted: Vec<&Event> =
+        events.iter().filter(|e| e.enabled && e.status == EventStatus::Active && !is_hidden(e, series, hide_rules)).collect();
     sorted.sort_by_key(|e| e.fields().start);
 
     let mut seen_series: HashSet<Uuid> = HashSet::new();
@@ -80,9 +78,10 @@ pub fn plan<'a>(events: &'a [Event], series: &'a [Series], hide_rules: &[String]
             continue;
         }
         if let Some(s) = Series::find(series, e)
-            && (!s.enabled || !seen_series.insert(s.id)) {
-                continue;
-            }
+            && (!s.enabled || !seen_series.insert(s.id))
+        {
+            continue;
+        }
         let Some(slide) = slide_for(e, series) else { continue };
         let file = file_name(&fields);
         out.push(Planned { event: e, slide, fields, file });
@@ -168,7 +167,14 @@ mod tests {
 
     fn ev(title: &str, start: &str) -> Event {
         Event::manual(
-            EventFields { title: title.into(), start: dt(start), end: None, all_day: false, location: String::new(), subtitle: String::new() },
+            EventFields {
+                title: title.into(),
+                start: dt(start),
+                end: None,
+                all_day: false,
+                location: String::new(),
+                subtitle: String::new(),
+            },
             Some(slide()),
         )
     }

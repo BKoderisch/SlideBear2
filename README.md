@@ -16,7 +16,8 @@ Mit `SLIDEBEAR_DATA=/pfad` lässt sich ein anderer Ordner nutzen (z. B. zum Test
 ## Einrichtung
 
 1. **Einstellungen → ChurchTools**: Adresse, Login-Token (ChurchTools → Profil → Login-Token), „Speichern“,
-   „Verbindung testen“, Kalender anhaken.
+   „Verbindung testen“, Kalender anhaken. Unter „Begrüßung“ den Dienst eintragen (Standard: „Präs“, findet z. B. „Präsi“):
+   Wer ihn am nächsten Sonntag hat, wird beim Start vom Eisbären mit Vornamen begrüßt.
 2. **Einstellungen → Export**: Ordner wählen, den ProPresenter einliest.
 3. **Layouts**: Ausgangspunkte für Slides (Standard-Layout, eigenes Hintergrundbild oder PPTX-Import).
 4. **🔄 Sync**, dann im Schnellexport pro Veranstaltung **➕ Slide anlegen** und ein Layout wählen.
@@ -28,6 +29,8 @@ Mit `SLIDEBEAR_DATA=/pfad` lässt sich ein anderer Ordner nutzen (z. B. zum Test
 - **Layout**: Vorlage für das Aussehen, z. B. „Foto + Titel + Infozeile“. Ändern wirkt nur auf neue Slides.
 - **Slide**: gehört einer Veranstaltung. Wiederkehrende ChurchTools-Termine (gleiche Serie) teilen sich eine
   Slide; Datum und Uhrzeit kommen per Platzhalter vom jeweiligen Termin. Einzeltermine haben ihre eigene.
+- Eine vorhandene PowerPoint-Folie wird über **➕ Neu › 📥 Aus PPTX …** zur Slide eines Termins bzw. einer Serie;
+  Datum, Uhrzeit und Titel auf der Folie werden dabei durch Platzhalter ersetzt.
 - Exportiert wird pro Veranstaltung nur der **nächste** Termin. Ein einzelnes Datum lässt sich unter
   „Termine“ überspringen.
 

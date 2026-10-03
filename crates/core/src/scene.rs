@@ -128,11 +128,7 @@ impl Scene {
 
     /// Oberstes sichtbares, nicht gesperrtes Element unter dem Punkt.
     pub fn hit_test(&self, x: f32, y: f32) -> Option<Uuid> {
-        self.elements
-            .iter()
-            .rev()
-            .find(|e| e.visible && !e.locked && e.frame.contains(x, y))
-            .map(|e| e.id)
+        self.elements.iter().rev().find(|e| e.visible && !e.locked && e.frame.contains(x, y)).map(|e| e.id)
     }
 }
 
@@ -149,15 +145,7 @@ pub struct Element {
 
 impl Element {
     pub fn new(name: impl Into<String>, frame: Rect, kind: ElementKind) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            name: name.into(),
-            frame,
-            opacity: 1.0,
-            locked: false,
-            visible: true,
-            kind,
-        }
+        Self { id: Uuid::new_v4(), name: name.into(), frame, opacity: 1.0, locked: false, visible: true, kind }
     }
 
     /// Kopie mit neuer ID (für Duplizieren und Vorlage → Slide).
@@ -256,9 +244,16 @@ pub enum ImageFit {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Filter {
     /// 0.0 = unverändert, 1.0 = schwarz.
-    Darken { amount: f32 },
-    Blur { radius: f32 },
-    Tint { color: Color, amount: f32 },
+    Darken {
+        amount: f32,
+    },
+    Blur {
+        radius: f32,
+    },
+    Tint {
+        color: Color,
+        amount: f32,
+    },
     Grayscale,
 }
 
@@ -312,7 +307,11 @@ mod tests {
     fn refit_4_3_to_16_9() {
         let mut scene = Scene { width: 1920, height: 1440, elements: Vec::new() };
         scene.elements.push(Element::new("bg", Rect::new(0.0, 0.0, 1920.0, 1440.0), ElementKind::Shape(ShapeStyle::default())));
-        scene.elements.push(Element::new("t", Rect::new(0.0, 0.0, 1920.0, 720.0), ElementKind::Text(TextStyle { size_px: 100.0, ..TextStyle::default() })));
+        scene.elements.push(Element::new(
+            "t",
+            Rect::new(0.0, 0.0, 1920.0, 720.0),
+            ElementKind::Text(TextStyle { size_px: 100.0, ..TextStyle::default() }),
+        ));
         scene.elements[1].frame.w = 960.0;
         scene.refit(1920, 1080);
         assert_eq!(scene.elements[0].frame, Rect::new(0.0, 0.0, 1920.0, 1080.0));

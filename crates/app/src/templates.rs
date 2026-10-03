@@ -2,10 +2,10 @@
 //! Layout wirken sich auf bestehende Slides nicht aus.
 
 use eframe::egui::{self, RichText, Vec2};
-use slidebear_core::{presets, Scene, Template};
+use slidebear_core::{Scene, Template, presets};
 use uuid::Uuid;
 
-use crate::app::{sample_fields, App};
+use crate::app::{App, sample_fields};
 use crate::editor::EditTarget;
 
 use crate::editor::DATE_PATTERNS;
@@ -22,15 +22,16 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
                 add(app, Template::new("Leeres Layout", Scene::default()));
             }
             if ui.button("🖼 Aus Bild …").on_hover_text("Standard-Layout mit eigenem Hintergrundbild").clicked()
-                && let Some(path) = rfd::FileDialog::new().add_filter("Bilder", &["png", "jpg", "jpeg", "webp"]).pick_file() {
-                    match app.store.import_asset_file(&path) {
-                        Ok(asset) => {
-                            let name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Layout".into());
-                            add(app, presets::event_template(&name, Some(&asset)));
-                        }
-                        Err(e) => app.error(e.to_string()),
+                && let Some(path) = rfd::FileDialog::new().add_filter("Bilder", &["png", "jpg", "jpeg", "webp"]).pick_file()
+            {
+                match app.store.import_asset_file(&path) {
+                    Ok(asset) => {
+                        let name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Layout".into());
+                        add(app, presets::event_template(&name, Some(&asset)));
                     }
+                    Err(e) => app.error(e.to_string()),
                 }
+            }
             if ui.button("📥 Aus PPTX …").clicked() {
                 app.pick_pptx();
             }
@@ -79,7 +80,9 @@ fn add(app: &mut App, t: Template) {
 }
 
 fn card(ui: &mut egui::Ui, app: &mut App, id: Uuid, fields: &slidebear_core::EventFields, w: f32) {
-    let Some(t) = app.store.data.template(id).cloned() else { return };
+    let Some(t) = app.store.data.template(id).cloned() else {
+        return;
+    };
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_width(w);
         ui.vertical(|ui| {
@@ -92,7 +95,13 @@ fn card(ui: &mut egui::Ui, app: &mut App, id: Uuid, fields: &slidebear_core::Eve
             }
 
             let mut name = t.name.clone();
-            if ui.add_sized([w, 46.0], egui::TextEdit::singleline(&mut name).font(egui::TextStyle::Heading).margin(egui::Margin::symmetric(12, 6))).changed() {
+            if ui
+                .add_sized(
+                    [w, 46.0],
+                    egui::TextEdit::singleline(&mut name).font(egui::TextStyle::Heading).margin(egui::Margin::symmetric(12, 6)),
+                )
+                .changed()
+            {
                 if let Some(t) = app.store.data.template_mut(id) {
                     t.name = name;
                 }
@@ -135,7 +144,7 @@ fn card(ui: &mut egui::Ui, app: &mut App, id: Uuid, fields: &slidebear_core::Eve
                 if ui.button("✏ Bearbeiten").clicked() {
                     app.open_editor(EditTarget::Template(id));
                 }
-                if ui.button("⧉ Duplizieren").clicked() {
+                if ui.button("📋 Duplizieren").clicked() {
                     let mut copy = t.clone();
                     copy.id = Uuid::new_v4();
                     copy.name = format!("{} Kopie", t.name);

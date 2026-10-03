@@ -46,7 +46,7 @@ fn churchtools(ui: &mut egui::Ui, app: &mut App) {
         });
         ui.end_row();
         ui.label("");
-        ui.label(RichText::new("ChurchTools → Profil → Login-Token. Der Token wird im System-Schlüsselbund gespeichert.").weak().small());
+        ui.label(RichText::new("ChurchTools › Profil › Login-Token. Der Token wird im System-Schlüsselbund gespeichert.").weak().small());
         ui.end_row();
 
         ui.label("");
@@ -59,6 +59,20 @@ fn churchtools(ui: &mut egui::Ui, app: &mut App) {
             if ui.button("Kalender laden").clicked() {
                 app.jobs.calendars(&ctx, url, app.token.clone());
             }
+        });
+        ui.end_row();
+
+        ui.label("Begrüßung");
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label("Dienst");
+                changed |= crate::theme::text_field(ui, egui::TextEdit::singleline(&mut app.store.data.settings.greet_service).hint_text("z. B. Präsi"), 220.0).changed();
+                if ui.button("Jetzt prüfen").clicked() {
+                    let ctx = ui.ctx().clone();
+                    app.check_presenter(&ctx, true);
+                }
+            });
+            ui.label(RichText::new("Wer am nächsten Sonntag diesen Dienst hat, wird beim Start vom Eisbären begrüßt. Es reicht ein Teil des Dienstnamens, „Präs“ findet z. B. „Präsi“ und „Präsentation“.").weak().small());
         });
         ui.end_row();
 
@@ -110,14 +124,16 @@ fn export(ui: &mut egui::Ui, app: &mut App) {
             let label = s.export_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "nicht gewählt".into());
             ui.label(label);
             if ui.button("Wählen …").clicked()
-                && let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                    s.export_dir = Some(dir);
-                    changed = true;
-                }
+                && let Some(dir) = rfd::FileDialog::new().pick_folder()
+            {
+                s.export_dir = Some(dir);
+                changed = true;
+            }
             if let Some(dir) = &s.export_dir
-                && ui.button("Öffnen").clicked() {
-                    let _ = open::that(dir);
-                }
+                && ui.button("Öffnen").clicked()
+            {
+                let _ = open::that(dir);
+            }
         });
         ui.end_row();
 
@@ -133,9 +149,7 @@ fn export(ui: &mut egui::Ui, app: &mut App) {
         ui.end_row();
     });
     ui.label(
-        RichText::new("Dateinamen: JJJJ-MM-TT_HHMM_titel.png. Die App löscht nur Dateien, die sie selbst angelegt hat.")
-            .weak()
-            .small(),
+        RichText::new("Dateinamen: JJJJ-MM-TT_HHMM_titel.png. Die App löscht nur Dateien, die sie selbst angelegt hat.").weak().small(),
     );
     if changed {
         app.store.mark_dirty();

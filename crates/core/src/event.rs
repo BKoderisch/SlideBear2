@@ -156,13 +156,7 @@ pub struct Template {
 
 impl Template {
     pub fn new(name: impl Into<String>, scene: Scene) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            name: name.into(),
-            scene,
-            date_style: DateStyle::default(),
-            time_style: TimeStyle::default(),
-        }
+        Self { id: Uuid::new_v4(), name: name.into(), scene, date_style: DateStyle::default(), time_style: TimeStyle::default() }
     }
 
     pub fn as_slide_ref(&self) -> SlideRef<'_> {
@@ -219,8 +213,7 @@ impl Series {
     }
 
     pub fn matches(&self, calendar_id: i64, appointment_id: i64, title: &str) -> bool {
-        self.calendar_id == calendar_id
-            && (self.appointment_id == appointment_id || self.title.trim().eq_ignore_ascii_case(title.trim()))
+        self.calendar_id == calendar_id && (self.appointment_id == appointment_id || self.title.trim().eq_ignore_ascii_case(title.trim()))
     }
 
     pub fn find<'a>(series: &'a [Series], event: &Event) -> Option<&'a Series> {

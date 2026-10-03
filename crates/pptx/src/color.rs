@@ -58,9 +58,7 @@ impl Theme {
 
 /// Liest die Farbe aus einem Container wie `a:solidFill`.
 pub fn parse_fill_color(container: Node, theme: &Theme) -> Option<Color> {
-    let n = container.children().find(|n| {
-        matches!(n.tag_name().name(), "srgbClr" | "schemeClr" | "sysClr" | "prstClr" | "scrgbClr")
-    })?;
+    let n = container.children().find(|n| matches!(n.tag_name().name(), "srgbClr" | "schemeClr" | "sysClr" | "prstClr" | "scrgbClr"))?;
     let base = match n.tag_name().name() {
         "srgbClr" => attr(n, "val").and_then(Color::from_hex),
         "schemeClr" => attr(n, "val").and_then(|v| theme.scheme(v)),

@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "id": 900,
+      "name": "Gottesdienst",
+      "startDate": "2026-10-04T08:00:00Z",
+      "eventServices": [
+        { "id": 1, "serviceId": 12, "agreed": true, "name": "Anna Beispiel", "person": { "domainType": "person", "title": "Anna Beispiel", "domainAttributes": { "firstName": "Anna", "lastName": "Beispiel" } } },
+        { "id": 2, "serviceId": 12, "agreed": false, "name": "Ben Muster", "person": { "domainType": "person", "title": "Ben Muster", "domainAttributes": { "firstName": "Ben", "lastName": "Muster" } } },
+        { "id": 3, "serviceId": 11, "agreed": true, "name": "Carla Technik", "person": { "domainAttributes": { "firstName": "Carla" } } },
+        { "id": 4, "serviceId": 12, "agreed": true, "name": null, "person": null }
+      ]
+    },
+    {
+      "id": 901,
+      "name": "Gottesdienst",
+      "startDate": "2026-10-11T08:00:00Z",
+      "eventServices": [
+        { "id": 5, "serviceId": 12, "agreed": true, "name": "Dora Später", "person": { "domainAttributes": { "firstName": "Dora" } } }
+      ]
+    }
+  ]
+}

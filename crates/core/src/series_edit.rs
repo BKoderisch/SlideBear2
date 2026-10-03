@@ -131,7 +131,7 @@ pub fn reset_all(field: Field, events: &mut [Event], series: &mut Series) {
 mod tests {
     use super::*;
     use crate::event::EventSource;
-    use crate::sync::{merge, RemoteAppointment};
+    use crate::sync::{RemoteAppointment, merge};
 
     fn dt(s: &str) -> NaiveDateTime {
         NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M").unwrap()
@@ -139,7 +139,14 @@ mod tests {
 
     fn occurrence(start: &str) -> Event {
         let mut e = Event::manual(
-            EventFields { title: "Gebet".into(), start: dt(start), end: Some(dt(start) + chrono::Duration::hours(1)), all_day: false, location: "Saal".into(), subtitle: String::new() },
+            EventFields {
+                title: "Gebet".into(),
+                start: dt(start),
+                end: Some(dt(start) + chrono::Duration::hours(1)),
+                all_day: false,
+                location: "Saal".into(),
+                subtitle: String::new(),
+            },
             None,
         );
         e.source = EventSource::ChurchTools { appointment_id: 7, calendar_id: 1, occurrence: e.base.start.date() };
@@ -147,7 +154,10 @@ mod tests {
     }
 
     fn setup() -> (Vec<Event>, Series) {
-        (vec![occurrence("2026-10-07 19:00"), occurrence("2026-10-14 19:00"), occurrence("2026-10-21 19:00")], Series::new(1, 7, "Gebet", None))
+        (
+            vec![occurrence("2026-10-07 19:00"), occurrence("2026-10-14 19:00"), occurrence("2026-10-21 19:00")],
+            Series::new(1, 7, "Gebet", None),
+        )
     }
 
     #[test]
@@ -190,7 +200,12 @@ mod tests {
         events[0] = edited.clone();
         apply_to_all(&before, &edited, &mut events, &mut s);
 
-        let new = RemoteAppointment { appointment_id: 7, calendar_id: 1, occurrence: dt("2026-10-28 19:00").date(), fields: occurrence("2026-10-28 19:00").base };
+        let new = RemoteAppointment {
+            appointment_id: 7,
+            calendar_id: 1,
+            occurrence: dt("2026-10-28 19:00").date(),
+            fields: occurrence("2026-10-28 19:00").base,
+        };
         merge(&mut events, &[new], std::slice::from_ref(&s), &[1], dt("2026-10-01 00:00"), dt("2026-11-30 00:00"));
         let added = events.iter().find(|e| e.base.start == dt("2026-10-28 19:00")).unwrap();
         assert_eq!(added.fields().title, "Gebetsabend");

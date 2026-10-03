@@ -4,16 +4,16 @@
 //! Auswahlrahmen, Anfasser und Hilfslinien darüber.
 
 use eframe::egui::{self, Color32, Key, Pos2, RichText, Sense, Stroke, StrokeKind, Vec2};
+use slidebear_core::format::{DateStyle, TimeStyle};
 use slidebear_core::placeholder::PLACEHOLDERS;
 use slidebear_core::scene::{
-    Color, Element, ElementKind, Filter, HAlign, ImageFit, ImageStyle, Outline, Rect, Scene, Shadow, ShapeKind,
-    ShapeStyle, Stroke as ShapeStroke, TextStyle, VAlign,
+    Color, Element, ElementKind, Filter, HAlign, ImageFit, ImageStyle, Outline, Rect, Scene, Shadow, ShapeKind, ShapeStyle,
+    Stroke as ShapeStroke, TextStyle, VAlign,
 };
-use slidebear_core::format::{DateStyle, TimeStyle};
 use slidebear_core::{EventFields, Series, Slide, SlideRef};
 use uuid::Uuid;
 
-use crate::app::{sample_fields, App};
+use crate::app::{App, sample_fields};
 use crate::preview::{LiveTexture, Previews};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -211,7 +211,9 @@ impl Editor {
         egui::Panel::right("props").default_size(320.0).resizable(true).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.properties(ui, app));
         });
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(crate::theme::CANVAS_BG).inner_margin(16.0)).show(ui, |ui| self.canvas(ui, app));
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(crate::theme::CANVAS_BG).inner_margin(16.0))
+            .show(ui, |ui| self.canvas(ui, app));
 
         self.shortcuts(ui.ctx());
 
@@ -279,14 +281,17 @@ impl Editor {
             self.selected = None;
         }
         if nudge != (0.0, 0.0)
-            && let Some(e) = self.selected.and_then(|id| self.scene.element_mut(id)) {
-                e.frame.x += nudge.0;
-                e.frame.y += nudge.1;
-            }
+            && let Some(e) = self.selected.and_then(|id| self.scene.element_mut(id))
+        {
+            e.frame.x += nudge.0;
+            e.frame.y += nudge.1;
+        }
     }
 
     fn duplicate(&mut self) {
-        let Some(idx) = self.selected.and_then(|id| self.scene.index_of(id)) else { return };
+        let Some(idx) = self.selected.and_then(|id| self.scene.index_of(id)) else {
+            return;
+        };
         let mut copy = self.scene.elements[idx].duplicate();
         copy.frame.x += 20.0;
         copy.frame.y += 20.0;
@@ -315,22 +320,32 @@ impl Editor {
             }
             let title = match self.target {
                 EditTarget::Template(id) => format!("Layout: {}", app.store.data.template(id).map(|t| t.name.as_str()).unwrap_or("")),
-                EditTarget::Series(id) => format!("Slide für alle Termine: {}", app.store.data.series(id).map(|s| s.title.as_str()).unwrap_or("")),
+                EditTarget::Series(id) => {
+                    format!("Slide für alle Termine: {}", app.store.data.series(id).map(|s| s.title.as_str()).unwrap_or(""))
+                }
                 EditTarget::Event(id) => format!("Slide: {}", app.store.data.event(id).map(|e| e.fields().title).unwrap_or_default()),
             };
             ui.label(RichText::new(title).strong());
             ui.separator();
 
-            if ui.add_enabled(!self.undo.is_empty() || self.pending.is_some(), egui::Button::new("↶")).on_hover_text("Rückgängig (Cmd/Strg+Z)").clicked() {
+            if ui
+                .add_enabled(!self.undo.is_empty() || self.pending.is_some(), egui::Button::new("⟲"))
+                .on_hover_text("Rückgängig (Cmd/Strg+Z)")
+                .clicked()
+            {
                 self.undo();
             }
-            if ui.add_enabled(!self.redo.is_empty(), egui::Button::new("↷")).on_hover_text("Wiederholen").clicked() {
+            if ui.add_enabled(!self.redo.is_empty(), egui::Button::new("⟳")).on_hover_text("Wiederholen").clicked() {
                 self.redo();
             }
             ui.separator();
 
             if ui.button("T Text").clicked() {
-                let mut el = Element::new("Text", Rect::new(w / 2.0 - 500.0, h / 2.0 - 100.0, 1000.0, 200.0), ElementKind::Text(TextStyle { text: "Text".into(), size_px: 96.0, ..TextStyle::default() }));
+                let mut el = Element::new(
+                    "Text",
+                    Rect::new(w / 2.0 - 500.0, h / 2.0 - 100.0, 1000.0, 200.0),
+                    ElementKind::Text(TextStyle { text: "Text".into(), size_px: 96.0, ..TextStyle::default() }),
+                );
                 el.name = "Text".into();
                 self.insert(el);
                 self.focus_text = true;
@@ -339,30 +354,49 @@ impl Editor {
                 && let Some(el) = pick_image(app, |asset, iw, ih| {
                     let s = (800.0 / iw).min(600.0 / ih).min(1.0);
                     let (ew, eh) = (iw * s, ih * s);
-                    Element::new("Bild", Rect::new((w - ew) / 2.0, (h - eh) / 2.0, ew, eh), ElementKind::Image(ImageStyle { asset, fit: ImageFit::Contain, filters: Vec::new() }))
-                }) {
-                    self.insert(el);
-                }
+                    Element::new(
+                        "Bild",
+                        Rect::new((w - ew) / 2.0, (h - eh) / 2.0, ew, eh),
+                        ElementKind::Image(ImageStyle { asset, fit: ImageFit::Contain, filters: Vec::new() }),
+                    )
+                })
+            {
+                self.insert(el);
+            }
             if ui.button("🌄 Hintergrund").on_hover_text("Bild über die ganze Slide, ganz unten").clicked()
-                && let Some(el) = pick_image(app, |asset, _, _| slidebear_core::presets::background(&asset, 0.0)) {
-                    let existing = self.scene.elements.first().filter(|e| e.locked && matches!(e.kind, ElementKind::Image(_)) && e.frame.w >= w - 1.0).map(|e| e.id);
-                    match existing.and_then(|id| self.scene.element_mut(id)) {
-                        Some(bg) => {
-                            if let (ElementKind::Image(old), ElementKind::Image(new)) = (&mut bg.kind, el.kind) {
-                                old.asset = new.asset;
-                            }
-                        }
-                        None => {
-                            self.selected = Some(el.id);
-                            self.scene.elements.insert(0, el);
+                && let Some(el) = pick_image(app, |asset, _, _| slidebear_core::presets::background(&asset, 0.0))
+            {
+                let existing = self
+                    .scene
+                    .elements
+                    .first()
+                    .filter(|e| e.locked && matches!(e.kind, ElementKind::Image(_)) && e.frame.w >= w - 1.0)
+                    .map(|e| e.id);
+                match existing.and_then(|id| self.scene.element_mut(id)) {
+                    Some(bg) => {
+                        if let (ElementKind::Image(old), ElementKind::Image(new)) = (&mut bg.kind, el.kind) {
+                            old.asset = new.asset;
                         }
                     }
+                    None => {
+                        self.selected = Some(el.id);
+                        self.scene.elements.insert(0, el);
+                    }
                 }
+            }
             ui.menu_button("⬛ Form", |ui| {
-                let shapes = [("Rechteck", ShapeKind::Rect), ("Abgerundet", ShapeKind::RoundedRect { radius: 30.0 }), ("Ellipse", ShapeKind::Ellipse)];
+                let shapes = [
+                    ("Rechteck", ShapeKind::Rect),
+                    ("Abgerundet", ShapeKind::RoundedRect { radius: 30.0 }),
+                    ("Ellipse", ShapeKind::Ellipse),
+                ];
                 for (label, shape) in shapes {
                     if ui.button(label).clicked() {
-                        self.insert(Element::new(label, Rect::new(w / 2.0 - 300.0, h / 2.0 - 150.0, 600.0, 300.0), ElementKind::Shape(ShapeStyle { shape, ..ShapeStyle::default() })));
+                        self.insert(Element::new(
+                            label,
+                            Rect::new(w / 2.0 - 300.0, h / 2.0 - 150.0, 600.0, 300.0),
+                            ElementKind::Shape(ShapeStyle { shape, ..ShapeStyle::default() }),
+                        ));
                     }
                 }
             });
@@ -370,7 +404,7 @@ impl Editor {
 
             let sel = self.selected.and_then(|id| self.scene.index_of(id));
             ui.add_enabled_ui(sel.is_some(), |ui| {
-                if ui.button("⤒").on_hover_text("Ganz nach vorne").clicked() {
+                if ui.button("⏫").on_hover_text("Ganz nach vorne").clicked() {
                     self.reorder(|_, n| n - 1);
                 }
                 if ui.button("⬆").on_hover_text("Eine Ebene nach vorne").clicked() {
@@ -379,19 +413,21 @@ impl Editor {
                 if ui.button("⬇").on_hover_text("Eine Ebene nach hinten").clicked() {
                     self.reorder(|i, _| i.saturating_sub(1));
                 }
-                if ui.button("⤓").on_hover_text("Ganz nach hinten").clicked() {
+                if ui.button("⏬").on_hover_text("Ganz nach hinten").clicked() {
                     self.reorder(|_, _| 0);
                 }
                 ui.separator();
                 if ui.button("↔").on_hover_text("Horizontal zentrieren").clicked()
-                    && let Some(e) = self.selected.and_then(|id| self.scene.element_mut(id)) {
-                        e.frame.x = (w - e.frame.w) / 2.0;
-                    }
+                    && let Some(e) = self.selected.and_then(|id| self.scene.element_mut(id))
+                {
+                    e.frame.x = (w - e.frame.w) / 2.0;
+                }
                 if ui.button("↕").on_hover_text("Vertikal zentrieren").clicked()
-                    && let Some(e) = self.selected.and_then(|id| self.scene.element_mut(id)) {
-                        e.frame.y = (h - e.frame.h) / 2.0;
-                    }
-                if ui.button("⧉").on_hover_text("Duplizieren (Cmd/Strg+D)").clicked() {
+                    && let Some(e) = self.selected.and_then(|id| self.scene.element_mut(id))
+                {
+                    e.frame.y = (h - e.frame.h) / 2.0;
+                }
+                if ui.button("📋").on_hover_text("Duplizieren (Cmd/Strg+D)").clicked() {
                     self.duplicate();
                 }
                 if ui.button("🗑").on_hover_text("Löschen (Entf)").clicked() {
@@ -418,7 +454,9 @@ impl Editor {
     }
 
     fn reorder(&mut self, to: impl Fn(usize, usize) -> usize) {
-        let Some(i) = self.selected.and_then(|id| self.scene.index_of(id)) else { return };
+        let Some(i) = self.selected.and_then(|id| self.scene.index_of(id)) else {
+            return;
+        };
         let n = self.scene.elements.len();
         let el = self.scene.elements.remove(i);
         let target = to(i, n).min(n - 1);
@@ -432,7 +470,7 @@ impl Editor {
             let mut select = None;
             for e in self.scene.elements.iter_mut().rev() {
                 ui.horizontal(|ui| {
-                    let eye = if e.visible { "👁" } else { "◌" };
+                    let eye = if e.visible { "👁" } else { "○" };
                     if ui.button(eye).on_hover_text("Sichtbar").clicked() {
                         e.visible = !e.visible;
                     }
@@ -497,69 +535,73 @@ impl Editor {
         }
 
         if resp.drag_started()
-            && let Some(origin) = ui.ctx().input(|i| i.pointer.press_origin()) {
-                let sp = to_slide(origin);
-                if let (Some(h), Some(id), Some(f)) = (handle_at(origin), self.selected, selected_frame) {
-                    self.drag = Some(Drag { kind: DragKind::Resize(h), id, start_frame: f, start_pos: sp });
-                } else if let Some(id) = self.scene.hit_test(sp.0, sp.1) {
-                    self.selected = Some(id);
-                    let f = self.scene.element(id).map(|e| e.frame).unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0));
-                    self.drag = Some(Drag { kind: DragKind::Move, id, start_frame: f, start_pos: sp });
-                } else {
-                    self.selected = None;
-                }
+            && let Some(origin) = ui.ctx().input(|i| i.pointer.press_origin())
+        {
+            let sp = to_slide(origin);
+            if let (Some(h), Some(id), Some(f)) = (handle_at(origin), self.selected, selected_frame) {
+                self.drag = Some(Drag { kind: DragKind::Resize(h), id, start_frame: f, start_pos: sp });
+            } else if let Some(id) = self.scene.hit_test(sp.0, sp.1) {
+                self.selected = Some(id);
+                let f = self.scene.element(id).map(|e| e.frame).unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0));
+                self.drag = Some(Drag { kind: DragKind::Move, id, start_frame: f, start_pos: sp });
+            } else {
+                self.selected = None;
             }
+        }
         if resp.dragged()
-            && let (Some(d), Some(p)) = (self.drag, pointer) {
-                let (px, py) = to_slide(p);
-                let (dx, dy) = (px - d.start_pos.0, py - d.start_pos.1);
-                let (shift, alt) = ui.ctx().input(|i| (i.modifiers.shift, i.modifiers.alt));
-                let snap = self.snap && !alt;
-                let threshold = 8.0 / scale;
-                let new_frame = match d.kind {
-                    DragKind::Move => {
-                        let mut f = Rect::new(d.start_frame.x + dx, d.start_frame.y + dy, d.start_frame.w, d.start_frame.h);
-                        self.guides.clear();
-                        if snap {
-                            let (xs, ys) = self.snap_lines(d.id);
-                            if let Some((off, line)) = best_snap(&[f.x, f.x + f.w / 2.0, f.x + f.w], &xs, threshold) {
-                                f.x += off;
-                                self.guides.push(Guide::V(line));
-                            }
-                            if let Some((off, line)) = best_snap(&[f.y, f.y + f.h / 2.0, f.y + f.h], &ys, threshold) {
-                                f.y += off;
-                                self.guides.push(Guide::H(line));
-                            }
+            && let (Some(d), Some(p)) = (self.drag, pointer)
+        {
+            let (px, py) = to_slide(p);
+            let (dx, dy) = (px - d.start_pos.0, py - d.start_pos.1);
+            let (shift, alt) = ui.ctx().input(|i| (i.modifiers.shift, i.modifiers.alt));
+            let snap = self.snap && !alt;
+            let threshold = 8.0 / scale;
+            let new_frame = match d.kind {
+                DragKind::Move => {
+                    let mut f = Rect::new(d.start_frame.x + dx, d.start_frame.y + dy, d.start_frame.w, d.start_frame.h);
+                    self.guides.clear();
+                    if snap {
+                        let (xs, ys) = self.snap_lines(d.id);
+                        if let Some((off, line)) = best_snap(&[f.x, f.x + f.w / 2.0, f.x + f.w], &xs, threshold) {
+                            f.x += off;
+                            self.guides.push(Guide::V(line));
                         }
-                        f
+                        if let Some((off, line)) = best_snap(&[f.y, f.y + f.h / 2.0, f.y + f.h], &ys, threshold) {
+                            f.y += off;
+                            self.guides.push(Guide::H(line));
+                        }
                     }
-                    DragKind::Resize(h) => {
-                        self.guides.clear();
-                        let lines = if snap { Some(self.snap_lines(d.id)) } else { None };
-                        resize(d.start_frame, h, dx, dy, shift, lines.as_ref(), threshold, &mut self.guides)
-                    }
-                };
-                if let Some(e) = self.scene.element_mut(d.id) {
-                    e.frame = new_frame;
+                    f
                 }
+                DragKind::Resize(h) => {
+                    self.guides.clear();
+                    let lines = if snap { Some(self.snap_lines(d.id)) } else { None };
+                    resize(d.start_frame, h, dx, dy, shift, lines.as_ref(), threshold, &mut self.guides)
+                }
+            };
+            if let Some(e) = self.scene.element_mut(d.id) {
+                e.frame = new_frame;
             }
+        }
         if resp.drag_stopped() {
             self.drag = None;
             self.guides.clear();
         }
         if resp.clicked()
-            && let Some(p) = resp.interact_pointer_pos() {
-                let sp = to_slide(p);
-                self.selected = self.scene.hit_test(sp.0, sp.1);
-            }
+            && let Some(p) = resp.interact_pointer_pos()
+        {
+            let sp = to_slide(p);
+            self.selected = self.scene.hit_test(sp.0, sp.1);
+        }
         if resp.double_clicked()
-            && let Some(p) = resp.interact_pointer_pos() {
-                let sp = to_slide(p);
-                if let Some(id) = self.scene.hit_test(sp.0, sp.1) {
-                    self.selected = Some(id);
-                    self.focus_text = matches!(self.scene.element(id).map(|e| &e.kind), Some(ElementKind::Text(_)));
-                }
+            && let Some(p) = resp.interact_pointer_pos()
+        {
+            let sp = to_slide(p);
+            if let Some(id) = self.scene.hit_test(sp.0, sp.1) {
+                self.selected = Some(id);
+                self.focus_text = matches!(self.scene.element(id).map(|e| &e.kind), Some(ElementKind::Text(_)));
             }
+        }
 
         // Overlays
         let accent = crate::theme::GLACIER;
@@ -668,7 +710,16 @@ fn best_snap(edges: &[f32], lines: &[f32], threshold: f32) -> Option<(f32, f32)>
 }
 
 #[allow(clippy::too_many_arguments)]
-fn resize(start: Rect, h: Handle, dx: f32, dy: f32, keep_aspect: bool, lines: Option<&(Vec<f32>, Vec<f32>)>, threshold: f32, guides: &mut Vec<Guide>) -> Rect {
+fn resize(
+    start: Rect,
+    h: Handle,
+    dx: f32,
+    dy: f32,
+    keep_aspect: bool,
+    lines: Option<&(Vec<f32>, Vec<f32>)>,
+    threshold: f32,
+    guides: &mut Vec<Guide>,
+) -> Rect {
     let (mut l, mut t, mut r, mut b) = (start.x, start.y, start.x + start.w, start.y + start.h);
     let (ax, ay) = h.anchor();
     let snap = |v: f32, list: &[f32], vertical: bool, guides: &mut Vec<Guide>| -> f32 {
@@ -715,7 +766,11 @@ fn resize(start: Rect, h: Handle, dx: f32, dy: f32, keep_aspect: bool, lines: Op
         let ratio = start.w / start.h;
         let w = r - l;
         let new_h = w / ratio;
-        if ay == 0.0 { t = b - new_h } else { b = t + new_h }
+        if ay == 0.0 {
+            t = b - new_h
+        } else {
+            b = t + new_h
+        }
         guides.clear();
     }
     Rect::new(l, t, r - l, b - t)
@@ -731,13 +786,8 @@ fn color_edit(ui: &mut egui::Ui, c: &mut Color) -> bool {
 }
 
 /// Datumsformate zur Auswahl (chrono-Muster, Beispiel).
-pub const DATE_PATTERNS: [(&str, &str); 5] = [
-    ("%d.%m.%Y", "07.12.2024"),
-    ("%d.%m.%y", "07.12.24"),
-    ("%-d.%-m.%Y", "7.12.2024"),
-    ("%d.%m.", "07.12."),
-    ("%Y-%m-%d", "2024-12-07"),
-];
+pub const DATE_PATTERNS: [(&str, &str); 5] =
+    [("%d.%m.%Y", "07.12.2024"), ("%d.%m.%y", "07.12.24"), ("%-d.%-m.%Y", "7.12.2024"), ("%d.%m.", "07.12."), ("%Y-%m-%d", "2024-12-07")];
 
 const WEIGHTS: [(u16, &str); 6] = [(100, "Thin"), (300, "Light"), (400, "Regular"), (500, "Medium"), (700, "Bold"), (900, "Black")];
 
@@ -815,7 +865,8 @@ fn text_props(ui: &mut egui::Ui, t: &mut TextStyle, families: &[String], filter:
         ui.end_row();
 
         ui.label("");
-        ui.checkbox(&mut t.auto_shrink, "Automatisch verkleinern").on_hover_text("Schrift wird kleiner, wenn der Text nicht in den Rahmen passt");
+        ui.checkbox(&mut t.auto_shrink, "Automatisch verkleinern")
+            .on_hover_text("Schrift wird kleiner, wenn der Text nicht in den Rahmen passt");
         ui.end_row();
     });
 
@@ -857,12 +908,13 @@ fn image_props(ui: &mut egui::Ui, img: &mut ImageStyle, app: &mut App) {
     ui.horizontal(|ui| {
         ui.label(RichText::new(&img.asset).small().weak());
         if ui.button("Ersetzen …").clicked()
-            && let Some(path) = rfd::FileDialog::new().add_filter("Bilder", &["png", "jpg", "jpeg", "webp", "gif", "bmp"]).pick_file() {
-                match app.store.import_asset_file(&path) {
-                    Ok(a) => img.asset = a,
-                    Err(e) => app.error(e.to_string()),
-                }
+            && let Some(path) = rfd::FileDialog::new().add_filter("Bilder", &["png", "jpg", "jpeg", "webp", "gif", "bmp"]).pick_file()
+        {
+            match app.store.import_asset_file(&path) {
+                Ok(a) => img.asset = a,
+                Err(e) => app.error(e.to_string()),
             }
+        }
     });
     ui.horizontal(|ui| {
         ui.label("Einpassen");
@@ -893,7 +945,7 @@ fn image_props(ui: &mut egui::Ui, img: &mut ImageStyle, app: &mut App) {
                     ui.label("Graustufen");
                 }
             }
-            if ui.button("✕").clicked() {
+            if ui.button("✖").clicked() {
                 remove = Some(i);
             }
         });

@@ -4,8 +4,8 @@
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime};
 use serde::Deserialize;
 use serde_json::Value;
-use slidebear_core::sync::RemoteAppointment;
 use slidebear_core::EventFields;
+use slidebear_core::sync::RemoteAppointment;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -45,10 +45,7 @@ impl Client {
         if !base.ends_with("/api") {
             base.push_str("/api");
         }
-        let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .user_agent("SlideBear")
-            .build()?;
+        let http = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(30)).user_agent("SlideBear").build()?;
         Ok(Self { base, token: token.trim().to_string(), http })
     }
 
@@ -66,10 +63,26 @@ impl Client {
         }
         let body: Value = resp.json()?;
         if !status.is_success() {
-            let message = body["message"].as_str().unwrap_or("unbekannter Fehler").to_string();
-            return Err(Error::Api { status: status.as_u16(), message });
+            return Err(Error::Api { status: status.as_u16(), message: api_message(&body) });
         }
         Ok(body)
+    }
+
+    /// Lädt mit Dienstbelegung. ChurchTools-Versionen unterscheiden sich darin, ob `include[]`
+    /// oder `include` erwartet wird; bei einem Validierungsfehler wird die nächste Variante versucht.
+    fn get_with_services(&self, path: &str, query: &[(String, String)]) -> Result<Value> {
+        let mut last = None;
+        for key in [Some("include[]"), Some("include"), None] {
+            let mut q = query.to_vec();
+            if let Some(k) = key {
+                q.push((k.to_string(), "eventServices".to_string()));
+            }
+            match self.get(path, &q) {
+                Err(e @ Error::Api { status: 400, .. }) => last = Some(e),
+                other => return other,
+            }
+        }
+        Err(last.unwrap_or(Error::Format("keine Antwort".into())))
     }
 
     /// Prüft die Verbindung, liefert den Namen des angemeldeten Benutzers.
@@ -82,6 +95,49 @@ impl Client {
     pub fn calendars(&self) -> Result<Vec<Calendar>> {
         let v = self.get("/calendars", &[])?;
         serde_json::from_value(v["data"].clone()).map_err(|e| Error::Format(e.to_string()))
+    }
+
+    /// Vornamen der Personen, die am `date` einen Dienst haben, dessen Name `service_term`
+    /// enthält (z. B. „Präsentation“), über alle Events dieses Tages. Liefert zusätzlich eine
+    /// Diagnose ohne Personendaten, falls niemand gefunden wird.
+    pub fn service_people(&self, date: NaiveDate, service_term: &str) -> Result<ServiceReport> {
+        let services = self.get("/services", &[])?;
+        let ids = matching_services(&services, service_term);
+        let service_names: Vec<String> = services["data"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|s| s["id"].as_i64().is_some_and(|id| ids.contains(&id)))
+            .filter_map(|s| s["name"].as_str().map(str::to_string))
+            .collect();
+        if ids.is_empty() {
+            return Err(Error::Format(format!("kein Dienst mit „{service_term}“ im Namen gefunden")));
+        }
+
+        // `to` ist bei ChurchTools exklusiv, daher bis zum Folgetag abfragen
+        let q = [
+            ("from".to_string(), date.format("%Y-%m-%d").to_string()),
+            ("to".to_string(), (date + chrono::Duration::days(1)).format("%Y-%m-%d").to_string()),
+        ];
+        let mut events = self.get_with_services("/events", &q)?;
+
+        // Fehlt die Dienstbelegung in der Liste, einzeln pro Event nachladen
+        if let Some(list) = events["data"].as_array_mut() {
+            for ev in list.iter_mut() {
+                let on_day = ev["startDate"].as_str().and_then(parse_ct_date).is_some_and(|d| d.date() == date);
+                if on_day
+                    && !ev["eventServices"].is_array()
+                    && let Some(id) = ev["id"].as_i64()
+                {
+                    let detail = self.get_with_services(&format!("/events/{id}"), &[])?;
+                    ev["eventServices"] = detail["data"]["eventServices"].clone();
+                }
+            }
+        }
+
+        let names = people_on(&events, &ids, date);
+        let diagnosis = diagnose(&events, &ids, date, &service_names);
+        Ok(ServiceReport { names, diagnosis })
     }
 
     pub fn appointments(&self, calendar_ids: &[i64], from: NaiveDate, to: NaiveDate) -> Result<Vec<RemoteAppointment>> {
@@ -128,6 +184,100 @@ pub fn parse_appointments(v: &Value) -> Result<Vec<RemoteAppointment>> {
     Ok(out)
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServiceReport {
+    pub names: Vec<String>,
+    /// Zusammenfassung ohne Personendaten, z. B. für „niemand gefunden“.
+    pub diagnosis: String,
+}
+
+/// Was an dem Tag gefunden wurde: Dienste, Events, Dienstbelegungen (ohne Namen).
+pub fn diagnose(events: &Value, service_ids: &[i64], date: NaiveDate, service_names: &[String]) -> String {
+    let all = events["data"].as_array().cloned().unwrap_or_default();
+    let on_day: Vec<&Value> =
+        all.iter().filter(|ev| ev["startDate"].as_str().and_then(parse_ct_date).is_some_and(|d| d.date() == date)).collect();
+    let mut parts = vec![format!("Dienst: {}", service_names.join(", "))];
+    if on_day.is_empty() {
+        parts.push(format!("keine Veranstaltung am {} gefunden ({} insgesamt geliefert)", date.format("%d.%m."), all.len()));
+    }
+    for ev in on_day {
+        let name = ev["name"].as_str().unwrap_or("?");
+        match ev["eventServices"].as_array() {
+            None => parts.push(format!("„{name}“: keine Dienstbelegung geliefert (Rechte?)")),
+            Some(list) => {
+                let matching: Vec<&Value> =
+                    list.iter().filter(|es| es["serviceId"].as_i64().is_some_and(|id| service_ids.contains(&id))).collect();
+                let with_person = matching.iter().filter(|es| !es["person"].is_null() || es["name"].is_string()).count();
+                parts.push(format!("„{name}“: {} Dienste, {} passend, davon {} mit Person", list.len(), matching.len(), with_person));
+            }
+        }
+    }
+    parts.join(" · ")
+}
+
+/// IDs aller Dienste, deren Name den Begriff enthält (ohne Groß-/Kleinschreibung).
+pub fn matching_services(services: &Value, term: &str) -> Vec<i64> {
+    let term = term.trim().to_lowercase();
+    services["data"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter(|s| !term.is_empty() && s["name"].as_str().is_some_and(|n| n.to_lowercase().contains(&term)))
+                .filter_map(|s| s["id"].as_i64())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Vornamen aus den Dienstbelegungen (`eventServices`) aller Events am Tag `date`.
+/// Zugesagte Dienste haben Vorrang; gibt es keine Zusage, zählen auch angefragte.
+pub fn people_on(events: &Value, service_ids: &[i64], date: NaiveDate) -> Vec<String> {
+    let mut agreed = Vec::new();
+    let mut requested = Vec::new();
+    for ev in events["data"].as_array().into_iter().flatten() {
+        let on_day = ev["startDate"].as_str().and_then(parse_ct_date).is_some_and(|d| d.date() == date);
+        if !on_day {
+            continue;
+        }
+        for es in ev["eventServices"].as_array().into_iter().flatten() {
+            if !es["serviceId"].as_i64().is_some_and(|id| service_ids.contains(&id)) {
+                continue;
+            }
+            let first = es["person"]["domainAttributes"]["firstName"]
+                .as_str()
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .map(str::to_string)
+                .or_else(|| es["name"].as_str().and_then(|n| n.split_whitespace().next()).map(str::to_string));
+            let Some(first) = first else { continue };
+            let list = if es["agreed"].as_bool().unwrap_or(false) { &mut agreed } else { &mut requested };
+            if !list.contains(&first) {
+                list.push(first);
+            }
+        }
+    }
+    if agreed.is_empty() { requested } else { agreed }
+}
+
+/// Fehlermeldung von ChurchTools inklusive Validierungsdetails (`errors`), falls vorhanden.
+fn api_message(body: &Value) -> String {
+    let mut msg = body["message"].as_str().unwrap_or("unbekannter Fehler").to_string();
+    let details: Vec<String> = body["errors"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            let field = e["fieldId"].as_str().or(e["field"].as_str()).unwrap_or("");
+            let text = e["message"].as_str().or(e["messageKey"].as_str())?;
+            Some(if field.is_empty() { text.to_string() } else { format!("{field}: {text}") })
+        })
+        .collect();
+    if !details.is_empty() {
+        msg.push_str(&format!(" ({})", details.join("; ")));
+    }
+    msg
+}
+
 fn str_field(v: &Value) -> String {
     v.as_str().unwrap_or("").trim().to_string()
 }
@@ -157,6 +307,37 @@ fn parse_ct_date(s: &str) -> Option<NaiveDateTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_presentation_service_people() {
+        let services: Value = serde_json::from_str(include_str!("../tests/fixtures/services.json")).unwrap();
+        let events: Value = serde_json::from_str(include_str!("../tests/fixtures/events.json")).unwrap();
+        // „Präs“ trifft „Präsi“ und „Präsentation …“
+        assert_eq!(matching_services(&services, "Präs"), vec![12, 13]);
+        assert_eq!(matching_services(&services, "präsentation"), vec![13]);
+        let ids = matching_services(&services, "Präsi");
+        assert_eq!(ids, vec![12]);
+        let sunday = NaiveDate::from_ymd_opt(2026, 10, 4).unwrap();
+        // Anna hat zugesagt, Ben nur angefragt; Carla ist Technik, Dora an einem anderen Tag
+        assert_eq!(people_on(&events, &ids, sunday), vec!["Anna".to_string()]);
+        // ohne Zusagen zählen Anfragen
+        let none_agreed = serde_json::to_string(&events).unwrap().replace("\"agreed\":true", "\"agreed\":false");
+        let events2: Value = serde_json::from_str(&none_agreed).unwrap();
+        assert_eq!(people_on(&events2, &ids, sunday), vec!["Anna".to_string(), "Ben".to_string()]);
+
+        let d = diagnose(&events, &ids, sunday, &["Präsentation".into()]);
+        assert!(d.contains("„Gottesdienst“: 4 Dienste, 3 passend, davon 2 mit Person"), "{d}");
+        let monday = NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+        assert!(diagnose(&events, &ids, monday, &[]).contains("keine Veranstaltung am 05.10."));
+    }
+
+    #[test]
+    fn api_message_includes_validation_details() {
+        let body: Value =
+            serde_json::from_str(r#"{"message":"There are validation errors","errors":[{"fieldId":"include","message":"Invalid value"}]}"#)
+                .unwrap();
+        assert_eq!(api_message(&body), "There are validation errors (include: Invalid value)");
+    }
 
     #[test]
     fn parses_fixture() {

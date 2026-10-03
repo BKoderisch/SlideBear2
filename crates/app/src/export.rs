@@ -8,7 +8,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use slidebear_core::export::{plan, render_key};
 use slidebear_core::placeholder;
-use slidebear_render::{save_png, Renderer};
+use slidebear_render::{Renderer, save_png};
 
 use crate::store::Data;
 
@@ -36,10 +36,7 @@ impl std::fmt::Display for Report {
 pub fn run(data: &Data, renderer: &mut Renderer, dir: &Path, today: NaiveDate) -> anyhow::Result<Report> {
     std::fs::create_dir_all(dir)?;
     let manifest_path = dir.join(MANIFEST);
-    let old: Manifest = std::fs::read(&manifest_path)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default();
+    let old: Manifest = std::fs::read(&manifest_path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
 
     let mut new = Manifest::default();
     let mut report = Report::default();
@@ -74,7 +71,7 @@ pub fn run(data: &Data, renderer: &mut Renderer, dir: &Path, today: NaiveDate) -
 mod tests {
     use super::*;
     use chrono::{Duration, Local, NaiveTime};
-    use slidebear_core::{presets, Event, EventFields, Slide};
+    use slidebear_core::{Event, EventFields, Slide, presets};
 
     #[test]
     fn writes_skips_and_cleans_up() {
@@ -95,7 +92,8 @@ mod tests {
 
         let r = run(&data, &mut renderer, &dir, today).unwrap();
         assert_eq!((r.written, r.unchanged, r.removed), (1, 0, 0));
-        let png = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).find(|e| e.path().extension().is_some_and(|x| x == "png")).unwrap();
+        let png =
+            std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).find(|e| e.path().extension().is_some_and(|x| x == "png")).unwrap();
         assert!(png.file_name().to_string_lossy().ends_with("_1900_gebetsabend.png"));
 
         // Zweiter Lauf: nichts geändert

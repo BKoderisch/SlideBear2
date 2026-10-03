@@ -3,14 +3,8 @@
 use crate::event::{EventFields, SlideRef};
 use crate::format::{format_date, format_time, weekday_de};
 
-pub const PLACEHOLDERS: [(&str, &str); 6] = [
-    ("titel", "Titel"),
-    ("datum", "Datum"),
-    ("zeit", "Uhrzeit"),
-    ("ort", "Ort"),
-    ("untertitel", "Untertitel"),
-    ("wochentag", "Wochentag"),
-];
+pub const PLACEHOLDERS: [(&str, &str); 6] =
+    [("titel", "Titel"), ("datum", "Datum"), ("zeit", "Uhrzeit"), ("ort", "Ort"), ("untertitel", "Untertitel"), ("wochentag", "Wochentag")];
 
 /// Ersetzt alle bekannten `{name}`-Platzhalter. Unbekannte bleiben unverändert stehen,
 /// damit Tippfehler im Editor sichtbar sind.

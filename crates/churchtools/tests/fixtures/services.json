@@ -1,0 +1,8 @@
+{
+  "data": [
+    { "id": 10, "name": "Predigt", "serviceGroupId": 1 },
+    { "id": 11, "name": "Technik / Ton", "serviceGroupId": 2 },
+    { "id": 12, "name": "Präsi", "serviceGroupId": 2 },
+    { "id": 13, "name": "Präsentation Kinderprogramm", "serviceGroupId": 3 }
+  ]
+}

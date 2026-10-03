@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use image::imageops::{self, FilterType};
 use image::RgbaImage;
+use image::imageops::{self, FilterType};
 use slidebear_core::scene::{Filter, ImageFit};
 use tiny_skia::{IntSize, Pixmap};
 

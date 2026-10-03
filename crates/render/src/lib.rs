@@ -8,8 +8,8 @@ mod text;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use slidebear_core::scene::{Color, Element, ElementKind, ImageStyle, ShapeKind, ShapeStyle};
 use slidebear_core::Scene;
+use slidebear_core::scene::{Color, Element, ElementKind, ImageStyle, ShapeKind, ShapeStyle};
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform};
 
 pub use text::FontLibrary;
@@ -76,9 +76,10 @@ impl Renderer {
         let fw = (el.frame.w * scale).round().max(1.0) as u32;
         let fh = (el.frame.h * scale).round().max(1.0) as u32;
         let key = format!("{}|{fw}x{fh}|{:?}|{:?}|{scale}", style.asset, style.fit, style.filters);
-        let placed = self.image_cache.entry(key).or_insert_with(|| {
-            image_ops::prepare(&self.assets_dir.join(&style.asset), fw, fh, style.fit, &style.filters, scale)
-        });
+        let placed = self
+            .image_cache
+            .entry(key)
+            .or_insert_with(|| image_ops::prepare(&self.assets_dir.join(&style.asset), fw, fh, style.fit, &style.filters, scale));
         let x = (el.frame.x * scale).round() as i32;
         let y = (el.frame.y * scale).round() as i32;
         match placed {
@@ -165,15 +166,17 @@ fn draw_missing(pm: &mut Pixmap, el: &Element, scale: f32) {
 
 /// Wandelt das Ergebnis in nicht-vormultipliziertes RGBA (z. B. für egui oder `image`).
 pub fn to_rgba(pm: &Pixmap) -> Vec<u8> {
-    pm.pixels().iter().flat_map(|p| {
-        let c = p.demultiply();
-        [c.red(), c.green(), c.blue(), c.alpha()]
-    }).collect()
+    pm.pixels()
+        .iter()
+        .flat_map(|p| {
+            let c = p.demultiply();
+            [c.red(), c.green(), c.blue(), c.alpha()]
+        })
+        .collect()
 }
 
 pub fn save_png(pm: &Pixmap, path: &Path) -> anyhow::Result<()> {
-    let img = image::RgbaImage::from_raw(pm.width(), pm.height(), to_rgba(pm))
-        .ok_or_else(|| anyhow::anyhow!("ungültige Bildgröße"))?;
+    let img = image::RgbaImage::from_raw(pm.width(), pm.height(), to_rgba(pm)).ok_or_else(|| anyhow::anyhow!("ungültige Bildgröße"))?;
     img.save(path)?;
     Ok(())
 }
