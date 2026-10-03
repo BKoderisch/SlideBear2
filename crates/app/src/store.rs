@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use slidebear_core::assets::content_name;
-use slidebear_core::{Event, SeriesLink, Template};
+use slidebear_core::{Event, Series, Template};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -22,7 +22,8 @@ pub struct Settings {
     pub export_on_sync: bool,
     /// Zoom der Oberfläche (1.0 = Normal).
     pub ui_scale: f32,
-    pub theme: crate::theme::ThemeKind,
+    /// ChurchTools-Termine mit diesen Begriffen im Titel ausblenden.
+    pub hide_rules: Vec<String>,
 }
 
 impl Default for Settings {
@@ -36,7 +37,7 @@ impl Default for Settings {
             export_days: 28,
             export_on_sync: false,
             ui_scale: 1.0,
-            theme: crate::theme::ThemeKind::default(),
+            hide_rules: Vec::new(),
         }
     }
 }
@@ -46,7 +47,9 @@ impl Default for Settings {
 pub struct Data {
     pub templates: Vec<Template>,
     pub events: Vec<Event>,
-    pub links: Vec<SeriesLink>,
+    /// Wiederkehrende Veranstaltungen mit ihrer Slide (früher „links“).
+    #[serde(alias = "links")]
+    pub series: Vec<Series>,
     pub settings: Settings,
 }
 
@@ -57,6 +60,14 @@ impl Data {
 
     pub fn template_mut(&mut self, id: uuid::Uuid) -> Option<&mut Template> {
         self.templates.iter_mut().find(|t| t.id == id)
+    }
+
+    pub fn series(&self, id: uuid::Uuid) -> Option<&Series> {
+        self.series.iter().find(|s| s.id == id)
+    }
+
+    pub fn series_mut(&mut self, id: uuid::Uuid) -> Option<&mut Series> {
+        self.series.iter_mut().find(|s| s.id == id)
     }
 
     pub fn event(&self, id: uuid::Uuid) -> Option<&Event> {
@@ -87,13 +98,18 @@ impl Store {
     pub fn open(root: PathBuf) -> anyhow::Result<Self> {
         std::fs::create_dir_all(root.join("assets")).with_context(|| format!("{} anlegen", root.display()))?;
         let file = root.join("data.json");
-        let data = if file.exists() {
+        let mut data: Data = if file.exists() {
             let raw = std::fs::read_to_string(&file)?;
             serde_json::from_str(&raw).with_context(|| format!("{} ist beschädigt", file.display()))?
         } else {
             Data::default()
         };
-        Ok(Self { root, data, dirty_since: None })
+        let migrated = slidebear_core::event::migrate(&mut data.events, &mut data.series, &data.templates);
+        let mut store = Self { root, data, dirty_since: None };
+        if migrated {
+            store.mark_dirty();
+        }
+        Ok(store)
     }
 
     pub fn root(&self) -> &Path {
@@ -161,5 +177,35 @@ impl Store {
             entry.set_password(token)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Prüft die Migration an einer Kopie echter Daten: `SLIDEBEAR_MIGRATE_CHECK=/ordner cargo test`.
+    #[test]
+    fn migrate_real_copy() {
+        let Some(dir) = std::env::var_os("SLIDEBEAR_MIGRATE_CHECK") else { return };
+        let mut store = Store::open(PathBuf::from(dir)).unwrap();
+        let d = &store.data;
+        let today = chrono::Local::now().date_naive();
+        println!("series: {}", d.series.len());
+        for s in &d.series {
+            println!("  {} slide={} enabled={}", s.title, s.slide.is_some(), s.enabled);
+        }
+        let with_slide = d.events.iter().filter(|e| slidebear_core::slide_for(e, &d.series).is_some()).count();
+        println!("events: {} mit Slide: {with_slide}", d.events.len());
+        let groups = slidebear_core::export::groups(&d.events, &d.series, &d.settings.hide_rules, today, today + chrono::Duration::days(60));
+        for g in &groups {
+            println!("  Zeile: {} {} (+{})", g.next.fields().title, g.next.fields().start, g.more);
+        }
+        let plan = slidebear_core::export::plan(&d.events, &d.series, &d.settings.hide_rules, today, d.settings.export_days);
+        println!("export: {:?}", plan.iter().map(|p| p.file.clone()).collect::<Vec<_>>());
+        store.save().unwrap();
+        let reloaded = Store::open(store.root().to_path_buf()).unwrap();
+        assert_eq!(reloaded.data.series.len(), store.data.series.len());
+        assert!(reloaded.data.events.iter().all(|e| e.template_id.is_none() && e.custom_scene.is_none()));
     }
 }

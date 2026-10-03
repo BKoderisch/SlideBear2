@@ -1,13 +1,13 @@
 //! Abgleich von ChurchTools-Terminen mit den lokalen Events.
 //!
 //! Regeln:
-//! - Neue Termine werden angelegt; passt eine Serien-Verknüpfung, bekommen sie gleich die Vorlage.
+//! - Neue Termine werden angelegt; gehören sie zu einer Serie mit Slide, nutzen sie automatisch deren Slide.
 //! - Bestehende Termine bekommen die neuen Quellwerte in `base`, lokale `overrides` bleiben unangetastet.
 //! - Termine im Sync-Zeitraum, die in ChurchTools fehlen, werden als `Cancelled` markiert (nicht gelöscht).
 
 use chrono::{NaiveDate, NaiveDateTime};
 
-use crate::event::{Event, EventFields, EventSource, EventStatus, FieldOverrides, SeriesLink};
+use crate::event::{Event, EventFields, EventSource, EventStatus, FieldOverrides, Series};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RemoteAppointment {
@@ -37,7 +37,7 @@ fn key(source: &EventSource) -> Option<(i64, NaiveDate)> {
 pub fn merge(
     events: &mut Vec<Event>,
     remote: &[RemoteAppointment],
-    links: &[SeriesLink],
+    series: &[Series],
     calendars: &[i64],
     from: NaiveDateTime,
     to: NaiveDateTime,
@@ -56,33 +56,20 @@ pub fn merge(
                     e.status = EventStatus::Active;
                     report.restored += 1;
                 }
-                if e.template_id.is_none()
-                    && let Some(link) = SeriesLink::find(links, e) {
-                        e.template_id = Some(link.template_id);
-                        e.enabled = true;
-                    }
             }
             None => {
-                let mut e = Event {
-                    id: uuid::Uuid::new_v4(),
-                    source: EventSource::ChurchTools {
-                        appointment_id: r.appointment_id,
-                        calendar_id: r.calendar_id,
-                        occurrence: r.occurrence,
-                    },
-                    base: r.fields.clone(),
-                    overrides: FieldOverrides::default(),
-                    template_id: None,
-                    custom_scene: None,
-                    enabled: false,
-                    status: EventStatus::Active,
+                let mut e = Event::manual(r.fields.clone(), None);
+                e.source = EventSource::ChurchTools {
+                    appointment_id: r.appointment_id,
+                    calendar_id: r.calendar_id,
+                    occurrence: r.occurrence,
                 };
-                if let Some(link) = SeriesLink::find(links, &e) {
-                    e.template_id = Some(link.template_id);
-                    e.enabled = true;
+                e.overrides = FieldOverrides::default();
+                if let Some(s) = Series::find(series, &e) {
                     if e.base.subtitle.is_empty() {
-                        e.base.subtitle = link.default_subtitle.clone();
+                        e.base.subtitle = s.default_subtitle.clone();
                     }
+                    crate::series_edit::apply_to(&s.overrides, &mut e);
                 }
                 events.push(e);
                 report.added += 1;
@@ -106,26 +93,11 @@ pub fn merge(
     report
 }
 
-/// Wendet eine (neue) Serien-Verknüpfung auf alle passenden Termine ohne Vorlage an.
-pub fn apply_link(events: &mut [Event], link: &SeriesLink) -> usize {
-    let mut n = 0;
-    for e in events.iter_mut() {
-        if e.template_id.is_none() && SeriesLink::find(std::slice::from_ref(link), e).is_some() {
-            e.template_id = Some(link.template_id);
-            e.enabled = true;
-            if e.base.subtitle.is_empty() {
-                e.base.subtitle = link.default_subtitle.clone();
-            }
-            n += 1;
-        }
-    }
-    n
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
+    use crate::event::{slide_for, Slide, Template};
+    use crate::scene::Scene;
 
     fn dt(s: &str) -> NaiveDateTime {
         NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M").unwrap()
@@ -147,33 +119,24 @@ mod tests {
         }
     }
 
-    fn link(template: Uuid) -> SeriesLink {
-        SeriesLink {
-            id: Uuid::new_v4(),
-            calendar_id: 1,
-            appointment_id: 10,
-            title: "Gebetsabend".into(),
-            template_id: template,
-            default_subtitle: "Alle sind willkommen".into(),
-            lead_days: None,
-        }
-    }
-
     const FROM: &str = "2026-10-01 00:00";
     const TO: &str = "2026-11-01 00:00";
 
     #[test]
-    fn adds_and_links_series() {
-        let tpl = Uuid::new_v4();
+    fn new_occurrences_use_series_slide() {
+        let mut s = Series::new(1, 10, "Gebetsabend", Some(Slide::from_layout(&Template::new("L", Scene::default()))));
+        s.default_subtitle = "Alle sind willkommen".into();
+        let series = vec![s];
         let mut events = Vec::new();
-        let r = [remote(10, "2026-10-07 19:00", "Gebetsabend"), remote(99, "2026-10-08 19:00", "Sonstiges")];
-        let rep = merge(&mut events, &r, &[link(tpl)], &[1], dt(FROM), dt(TO));
-        assert_eq!(rep.added, 2);
-        assert_eq!(events[0].template_id, Some(tpl));
-        assert!(events[0].enabled);
-        assert_eq!(events[0].base.subtitle, "Alle sind willkommen");
-        assert_eq!(events[1].template_id, None);
-        assert!(!events[1].enabled);
+        let r = [remote(10, "2026-10-07 19:00", "Gebetsabend"), remote(10, "2026-10-14 19:00", "Gebetsabend"), remote(99, "2026-10-08 19:00", "Sonstiges")];
+        let rep = merge(&mut events, &r, &series, &[1], dt(FROM), dt(TO));
+        assert_eq!(rep.added, 3);
+        assert!(events.iter().all(|e| e.enabled && e.slide.is_none()));
+        let gebet: Vec<_> = events.iter().filter(|e| e.base.title == "Gebetsabend").collect();
+        assert!(gebet.iter().all(|e| slide_for(e, &series).is_some()));
+        assert_eq!(gebet[0].base.subtitle, "Alle sind willkommen");
+        let other = events.iter().find(|e| e.base.title == "Sonstiges").unwrap();
+        assert!(slide_for(other, &series).is_none());
     }
 
     #[test]

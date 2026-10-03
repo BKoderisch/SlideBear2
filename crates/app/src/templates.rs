@@ -1,4 +1,5 @@
-//! Vorlagen-Galerie: anlegen, duplizieren, umbenennen, Datums-/Zeitformat, Editor öffnen.
+//! Layout-Galerie: Ausgangspunkte für neue Slides. Eine Slide ist eine Kopie, Änderungen am
+//! Layout wirken sich auf bestehende Slides nicht aus.
 
 use eframe::egui::{self, RichText, Vec2};
 use slidebear_core::{presets, Scene, Template};
@@ -7,30 +8,24 @@ use uuid::Uuid;
 use crate::app::{sample_fields, App};
 use crate::editor::EditTarget;
 
-const DATE_PATTERNS: [(&str, &str); 5] = [
-    ("%d.%m.%Y", "07.12.2024"),
-    ("%d.%m.%y", "07.12.24"),
-    ("%-d.%-m.%Y", "7.12.2024"),
-    ("%d.%m.", "07.12."),
-    ("%Y-%m-%d", "2024-12-07"),
-];
+use crate::editor::DATE_PATTERNS;
 
 pub fn show(ui: &mut egui::Ui, app: &mut App) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.heading("Vorlagen");
+            ui.heading("Layouts");
             ui.add_space(16.0);
             if ui.button("➕ Standard-Layout").on_hover_text("Titel, Infozeile und Untertitel, zentriert").clicked() {
-                add(app, presets::event_template("Neue Vorlage", None));
+                add(app, presets::event_template("Neues Layout", None));
             }
-            if ui.button("➕ Leere Vorlage").clicked() {
-                add(app, Template::new("Leere Vorlage", Scene::default()));
+            if ui.button("➕ Leeres Layout").clicked() {
+                add(app, Template::new("Leeres Layout", Scene::default()));
             }
             if ui.button("🖼 Aus Bild …").on_hover_text("Standard-Layout mit eigenem Hintergrundbild").clicked()
                 && let Some(path) = rfd::FileDialog::new().add_filter("Bilder", &["png", "jpg", "jpeg", "webp"]).pick_file() {
                     match app.store.import_asset_file(&path) {
                         Ok(asset) => {
-                            let name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Vorlage".into());
+                            let name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Layout".into());
                             add(app, presets::event_template(&name, Some(&asset)));
                         }
                         Err(e) => app.error(e.to_string()),
@@ -55,22 +50,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
     });
 
     if let Some(id) = app.confirm_delete_template {
-        let used = app.store.data.events.iter().filter(|e| e.template_id == Some(id)).count();
         let name = app.store.data.template(id).map(|t| t.name.clone()).unwrap_or_default();
         let modal = egui::Modal::new(egui::Id::new("del_tpl")).show(ui.ctx(), |ui| {
-            ui.heading(format!("Vorlage „{name}“ löschen?"));
-            if used > 0 {
-                ui.label(format!("{used} Termine verwenden diese Vorlage und haben danach keine Slide mehr."));
-            }
+            ui.heading(format!("Layout „{name}“ löschen?"));
+            ui.label("Bestehende Slides bleiben erhalten, sie sind eigenständige Kopien.");
             ui.horizontal(|ui| {
                 if ui.button("Löschen").clicked() {
                     app.store.data.templates.retain(|t| t.id != id);
-                    app.store.data.links.retain(|l| l.template_id != id);
-                    for e in &mut app.store.data.events {
-                        if e.template_id == Some(id) {
-                            e.template_id = None;
-                        }
-                    }
                     app.store.mark_dirty();
                     app.confirm_delete_template = None;
                 }
@@ -99,23 +85,21 @@ fn card(ui: &mut egui::Ui, app: &mut App, id: Uuid, fields: &slidebear_core::Eve
         ui.vertical(|ui| {
             let size = Vec2::new(w, w * t.scene.height as f32 / t.scene.width as f32);
             let ppp = ui.ctx().pixels_per_point();
-            let tex = app.previews.get(ui.ctx(), &mut app.renderer, &t.scene, fields, &t, size.x * ppp);
+            let tex = app.previews.get(ui.ctx(), &mut app.renderer, t.as_slide_ref(), fields, size.x * ppp);
             let img = ui.add(egui::Image::new(&tex).fit_to_exact_size(size).sense(egui::Sense::click()));
             if img.double_clicked() {
                 app.open_editor(EditTarget::Template(id));
             }
 
             let mut name = t.name.clone();
-            if ui.add(egui::TextEdit::singleline(&mut name).desired_width(w).font(egui::TextStyle::Heading)).changed() {
+            if ui.add_sized([w, 46.0], egui::TextEdit::singleline(&mut name).font(egui::TextStyle::Heading).margin(egui::Margin::symmetric(12, 6))).changed() {
                 if let Some(t) = app.store.data.template_mut(id) {
                     t.name = name;
                 }
                 app.store.mark_dirty();
             }
 
-            let used = app.store.data.events.iter().filter(|e| e.template_id == Some(id)).count();
-            let links = app.store.data.links.iter().filter(|l| l.template_id == id).count();
-            ui.label(RichText::new(format!("{used} Termine · {links} Serien")).weak());
+            ui.label(RichText::new("Formate für neue Slides aus diesem Layout:").weak().small());
 
             let mut tpl = t.clone();
             let mut changed = false;
@@ -137,7 +121,7 @@ fn card(ui: &mut egui::Ui, app: &mut App, id: Uuid, fields: &slidebear_core::Eve
             });
             ui.horizontal(|ui| {
                 ui.label("Zeit-Zusatz");
-                changed |= ui.add(egui::TextEdit::singleline(&mut tpl.time_style.suffix).desired_width(60.0)).changed();
+                changed |= crate::theme::text_field(ui, egui::TextEdit::singleline(&mut tpl.time_style.suffix), 90.0).changed();
             });
             if changed {
                 if let Some(t) = app.store.data.template_mut(id) {

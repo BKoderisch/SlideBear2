@@ -6,8 +6,8 @@ use std::path::Path;
 
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
-use slidebear_core::export::{plan, render_key, scene_for};
-use slidebear_core::{placeholder, Template};
+use slidebear_core::export::{plan, render_key};
+use slidebear_core::placeholder;
 use slidebear_render::{save_png, Renderer};
 
 use crate::store::Data;
@@ -41,20 +41,17 @@ pub fn run(data: &Data, renderer: &mut Renderer, dir: &Path, today: NaiveDate) -
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
 
-    let fallback = Template::new("", Default::default());
     let mut new = Manifest::default();
     let mut report = Report::default();
 
-    for p in plan(&data.events, &data.templates, &data.links, today, data.settings.export_days) {
-        let Some(scene) = scene_for(p.event, p.template) else { continue };
-        let key = render_key(scene, &p.fields, p.template);
+    for p in plan(&data.events, &data.series, &data.settings.hide_rules, today, data.settings.export_days) {
+        let key = render_key(p.slide, &p.fields);
         let target = dir.join(&p.file);
         if old.files.get(&p.file) == Some(&key) && target.exists() {
             report.unchanged += 1;
         } else {
-            let tpl = p.template.unwrap_or(&fallback);
-            let fields = p.fields.clone();
-            let pm = renderer.render(scene, &|s| placeholder::resolve(s, &fields, tpl));
+            let (slide, fields) = (p.slide, p.fields.clone());
+            let pm = renderer.render(slide.scene, &|s| placeholder::resolve(s, &fields, slide));
             save_png(&pm, &target)?;
             report.written += 1;
         }
@@ -77,7 +74,7 @@ pub fn run(data: &Data, renderer: &mut Renderer, dir: &Path, today: NaiveDate) -
 mod tests {
     use super::*;
     use chrono::{Duration, Local, NaiveTime};
-    use slidebear_core::{presets, Event, EventFields};
+    use slidebear_core::{presets, Event, EventFields, Slide};
 
     #[test]
     fn writes_skips_and_cleans_up() {
@@ -93,8 +90,7 @@ mod tests {
             subtitle: String::new(),
         };
         let mut data = Data::default();
-        data.events.push(Event::manual(fields, Some(tpl.id)));
-        data.templates.push(tpl);
+        data.events.push(Event::manual(fields, Some(Slide::from_layout(&tpl))));
         let mut renderer = Renderer::new(dir.join("assets"));
 
         let r = run(&data, &mut renderer, &dir, today).unwrap();

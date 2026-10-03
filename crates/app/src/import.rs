@@ -1,11 +1,11 @@
-//! PPTX-Import-Dialog: Folien ansehen, Smart-Platzhalter prüfen, als Vorlage oder Termin übernehmen.
+//! PPTX-Import-Dialog: Folien ansehen, Smart-Platzhalter prüfen, als Layout oder Termin übernehmen.
 
 use std::path::Path;
 
 use eframe::egui::{self, RichText, Vec2};
 use slidebear_core::scene::{DEFAULT_HEIGHT, DEFAULT_WIDTH};
 use slidebear_core::smart::{detect, Detection};
-use slidebear_core::{Event, Template};
+use slidebear_core::{Event, Slide, Template};
 use slidebear_pptx::ImportedSlide;
 
 use crate::app::{sample_fields, App};
@@ -68,7 +68,7 @@ impl ImportDialog {
             if let Some(p) = &item.detection.date_pattern {
                 t.date_style.pattern = p.clone();
             }
-            // Stand auf der Folie nur eine Startzeit („19:30 Uhr“), soll die Vorlage auch keine Endzeit zeigen
+            // Stand auf der Folie nur eine Startzeit („19:30 Uhr“), soll auch die Slide keine Endzeit zeigen
             if item.detection.start_time.is_some() {
                 t.time_style.show_end = item.detection.end_time.is_some();
             }
@@ -104,27 +104,27 @@ impl ImportDialog {
                             let ppp = ui.ctx().pixels_per_point();
                             // Original (ohne Platzhalter) und Ergebnis mit Beispieldaten
                             let original = Template::new("", item.slide.scene.clone());
-                            let tex = app.previews.get(ui.ctx(), &mut app.renderer, &original.scene, &preview_fields, &original, w * ppp);
+                            let tex = app.previews.get(ui.ctx(), &mut app.renderer, original.as_slide_ref(), &preview_fields, w * ppp);
                             ui.add(egui::Image::new(&tex).fit_to_exact_size(size));
                             if item.smart && item.action != Action::Skip {
-                                let tex = app.previews.get(ui.ctx(), &mut app.renderer, &tpl.scene, &preview_fields, &tpl, w * ppp);
+                                let tex = app.previews.get(ui.ctx(), &mut app.renderer, tpl.as_slide_ref(), &preview_fields, w * ppp);
                                 ui.add(egui::Image::new(&tex).fit_to_exact_size(size)).on_hover_text("Vorschau mit Beispieldaten");
                             }
                             ui.vertical(|ui| {
                                 ui.label(RichText::new(format!("Folie {}", item.slide.number)).strong());
                                 ui.horizontal(|ui| {
                                     ui.selectable_value(&mut item.action, Action::Skip, "Überspringen");
-                                    ui.selectable_value(&mut item.action, Action::Template, "Als Vorlage");
+                                    ui.selectable_value(&mut item.action, Action::Template, "Als Layout");
                                     let can_event = item.detection.date.is_some();
                                     ui.add_enabled_ui(can_event, |ui| {
-                                        ui.selectable_value(&mut item.action, Action::TemplateAndEvent, "Vorlage + Termin")
+                                        ui.selectable_value(&mut item.action, Action::TemplateAndEvent, "Als Termin mit Slide")
                                             .on_disabled_hover_text("Kein Datum auf der Folie erkannt");
                                     });
                                 });
                                 if item.action != Action::Skip {
                                     ui.horizontal(|ui| {
                                         ui.label("Name");
-                                        ui.text_edit_singleline(&mut item.name);
+                                        crate::theme::text_field(ui, egui::TextEdit::singleline(&mut item.name), 300.0);
                                     });
                                     if !item.detection.is_empty() {
                                         ui.checkbox(&mut item.smart, "Smart-Platzhalter");
@@ -163,19 +163,23 @@ impl ImportDialog {
         let mut events = 0;
         for item in self.items.iter().filter(|i| i.action != Action::Skip) {
             let tpl = self.prepared(item);
-            let tid = tpl.id;
-            app.store.data.templates.push(tpl);
-            templates += 1;
-            if item.action == Action::TemplateAndEvent
-                && let Some(fields) = item.detection.to_fields() {
-                    let e = Event::manual(fields, Some(tid));
+            match item.action {
+                Action::TemplateAndEvent => {
+                    let Some(fields) = item.detection.to_fields() else { continue };
+                    let slide = Slide { scene: tpl.scene, date_style: tpl.date_style, time_style: tpl.time_style };
+                    let e = Event::manual(fields, Some(slide));
                     app.selected_event = Some(e.id);
                     app.store.data.events.push(e);
                     events += 1;
                 }
+                _ => {
+                    app.store.data.templates.push(tpl);
+                    templates += 1;
+                }
+            }
         }
         app.store.mark_dirty();
         app.renderer.clear_cache();
-        app.info(format!("Import: {templates} Vorlagen, {events} Termine angelegt"));
+        app.info(format!("Import: {templates} Layouts, {events} Termine angelegt"));
     }
 }

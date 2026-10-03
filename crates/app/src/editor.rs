@@ -9,15 +9,20 @@ use slidebear_core::scene::{
     Color, Element, ElementKind, Filter, HAlign, ImageFit, ImageStyle, Outline, Rect, Scene, Shadow, ShapeKind,
     ShapeStyle, Stroke as ShapeStroke, TextStyle, VAlign,
 };
-use slidebear_core::{EventFields, Template};
+use slidebear_core::format::{DateStyle, TimeStyle};
+use slidebear_core::{EventFields, Series, Slide, SlideRef};
 use uuid::Uuid;
 
-use crate::app::{sample_fields, template_or_default, App};
+use crate::app::{sample_fields, App};
 use crate::preview::{LiveTexture, Previews};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditTarget {
+    /// Layout bearbeiten.
     Template(Uuid),
+    /// Slide einer wiederkehrenden Veranstaltung.
+    Series(Uuid),
+    /// Eigene Slide eines einzelnen Termins.
     Event(Uuid),
 }
 
@@ -83,6 +88,8 @@ enum Guide {
 pub struct Editor {
     target: EditTarget,
     scene: Scene,
+    date_style: DateStyle,
+    time_style: TimeStyle,
     selected: Option<Uuid>,
     undo: Vec<Scene>,
     redo: Vec<Scene>,
@@ -91,17 +98,18 @@ pub struct Editor {
     drag: Option<Drag>,
     guides: Vec<Guide>,
     focus_text: bool,
-    preview_event: Option<Uuid>,
     font_filter: String,
     live: LiveTexture,
     snap: bool,
 }
 
 impl Editor {
-    pub fn new(target: EditTarget, scene: Scene) -> Self {
+    pub fn new(target: EditTarget, slide: Slide) -> Self {
         Self {
             target,
-            scene,
+            scene: slide.scene,
+            date_style: slide.date_style,
+            time_style: slide.time_style,
             selected: None,
             undo: Vec::new(),
             redo: Vec::new(),
@@ -109,43 +117,61 @@ impl Editor {
             drag: None,
             guides: Vec::new(),
             focus_text: false,
-            preview_event: None,
             font_filter: String::new(),
             live: LiveTexture::default(),
             snap: true,
         }
     }
 
+    fn slide(&self) -> Slide {
+        Slide { scene: self.scene.clone(), date_style: self.date_style.clone(), time_style: self.time_style.clone() }
+    }
+
     fn write_back(&self, app: &mut App) {
+        let d = &mut app.store.data;
         match self.target {
             EditTarget::Template(id) => {
-                if let Some(t) = app.store.data.template_mut(id) {
+                if let Some(t) = d.template_mut(id) {
                     t.scene = self.scene.clone();
+                    t.date_style = self.date_style.clone();
+                    t.time_style = self.time_style.clone();
+                }
+            }
+            EditTarget::Series(id) => {
+                let slide = self.slide();
+                if let Some(s) = d.series_mut(id) {
+                    s.slide = Some(slide);
                 }
             }
             EditTarget::Event(id) => {
-                if let Some(e) = app.store.data.event_mut(id) {
-                    e.custom_scene = Some(self.scene.clone());
+                let slide = self.slide();
+                if let Some(e) = d.event_mut(id) {
+                    e.slide = Some(slide);
                 }
             }
         }
         app.store.mark_dirty();
     }
 
-    /// Termindaten und Formatvorlage für die Vorschau.
-    fn preview_data(&self, app: &App) -> (EventFields, Template) {
+    /// Termindaten für die Vorschau: der nächste Termin der Serie, der Termin selbst oder Beispieldaten.
+    fn preview_fields(&self, app: &App) -> EventFields {
+        let d = &app.store.data;
         match self.target {
-            EditTarget::Event(id) => {
-                let e = app.store.data.event(id);
-                let t = e.and_then(|e| e.template_id).and_then(|t| app.store.data.template(t));
-                (e.map(|e| e.fields()).unwrap_or_else(sample_fields), template_or_default(t))
+            EditTarget::Event(id) => d.event(id).map(|e| e.fields()),
+            EditTarget::Series(id) => {
+                let today = chrono::Local::now().date_naive();
+                d.series(id).and_then(|s| {
+                    d.events
+                        .iter()
+                        .filter(|e| Series::find(std::slice::from_ref(s), e).is_some())
+                        .map(|e| e.fields())
+                        .filter(|f| f.start.date() >= today)
+                        .min_by_key(|f| f.start)
+                })
             }
-            EditTarget::Template(id) => {
-                let t = template_or_default(app.store.data.template(id));
-                let fields = self.preview_event.and_then(|e| app.store.data.event(e)).map(|e| e.fields()).unwrap_or_else(sample_fields);
-                (fields, t)
-            }
+            EditTarget::Template(_) => None,
         }
+        .unwrap_or_else(sample_fields)
     }
 
     fn commit_pending(&mut self) {
@@ -175,6 +201,7 @@ impl Editor {
     /// Liefert `false`, wenn der Editor geschlossen wurde.
     pub fn show(&mut self, ui: &mut egui::Ui, app: &mut App) -> bool {
         let before = self.scene.clone();
+        let styles_before = (self.date_style.clone(), self.time_style.clone());
         let mut keep_open = true;
 
         egui::Panel::top("editor_top").show(ui, |ui| {
@@ -184,14 +211,15 @@ impl Editor {
         egui::Panel::right("props").default_size(320.0).resizable(true).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.properties(ui, app));
         });
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(app.palette().canvas_bg).inner_margin(16.0)).show(ui, |ui| self.canvas(ui, app));
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(crate::theme::CANVAS_BG).inner_margin(16.0)).show(ui, |ui| self.canvas(ui, app));
 
         self.shortcuts(ui.ctx());
 
-        let changed = self.scene != before;
-        if changed && self.pending.is_none() {
+        let scene_changed = self.scene != before;
+        if scene_changed && self.pending.is_none() {
             self.pending = Some(before);
         }
+        let changed = scene_changed || styles_before != (self.date_style.clone(), self.time_style.clone());
         let busy = ui.ctx().input(|i| i.pointer.any_down()) || ui.ctx().egui_wants_keyboard_input();
         if !busy {
             self.commit_pending();
@@ -286,7 +314,8 @@ impl Editor {
                 keep = false;
             }
             let title = match self.target {
-                EditTarget::Template(id) => format!("Vorlage: {}", app.store.data.template(id).map(|t| t.name.as_str()).unwrap_or("")),
+                EditTarget::Template(id) => format!("Layout: {}", app.store.data.template(id).map(|t| t.name.as_str()).unwrap_or("")),
+                EditTarget::Series(id) => format!("Slide für alle Termine: {}", app.store.data.series(id).map(|s| s.title.as_str()).unwrap_or("")),
                 EditTarget::Event(id) => format!("Slide: {}", app.store.data.event(id).map(|e| e.fields().title).unwrap_or_default()),
             };
             ui.label(RichText::new(title).strong());
@@ -372,25 +401,18 @@ impl Editor {
             ui.separator();
             ui.checkbox(&mut self.snap, "Einrasten");
 
-            if let EditTarget::Template(tid) = self.target {
-                ui.separator();
-                ui.label("Vorschau mit");
-                let events: Vec<(Uuid, String)> = app
-                    .store
-                    .data
-                    .events
-                    .iter()
-                    .filter(|e| e.template_id == Some(tid))
-                    .map(|e| (e.id, format!("{} ({})", e.fields().title, e.fields().start.format("%d.%m."))))
-                    .collect();
-                let current = self.preview_event.and_then(|id| events.iter().find(|(e, _)| *e == id)).map(|(_, n)| n.clone()).unwrap_or_else(|| "Beispieldaten".into());
-                egui::ComboBox::from_id_salt("preview_with").selected_text(current).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.preview_event, None, "Beispieldaten");
-                    for (id, name) in events {
-                        ui.selectable_value(&mut self.preview_event, Some(id), name);
+            ui.separator();
+            ui.label("Datum");
+            let current = DATE_PATTERNS.iter().find(|(p, _)| *p == self.date_style.pattern).map(|(_, ex)| *ex).unwrap_or("eigenes");
+            egui::ComboBox::from_id_salt("date_style").selected_text(current).show_ui(ui, |ui| {
+                for (p, ex) in DATE_PATTERNS {
+                    if ui.selectable_label(self.date_style.pattern == p, ex).clicked() {
+                        self.date_style.pattern = p.into();
                     }
-                });
-            }
+                }
+            });
+            ui.checkbox(&mut self.time_style.omit_zero_minutes, "10 statt 10:00");
+            ui.checkbox(&mut self.time_style.show_end, "Endzeit");
         });
         keep
     }
@@ -442,10 +464,11 @@ impl Editor {
         let rect = egui::Rect::from_center_size(ui.max_rect().center(), size);
         let resp = ui.allocate_rect(rect, Sense::click_and_drag());
 
-        let (fields, tpl) = self.preview_data(app);
+        let fields = self.preview_fields(app);
         let ppp = ui.ctx().pixels_per_point();
         let quality = if self.drag.is_some() { 0.5 } else { 1.0 };
-        let tex = Previews::live(&mut self.live, ui.ctx(), &mut app.renderer, &self.scene, &fields, &tpl, size.x * ppp * quality);
+        let slide = SlideRef { scene: &self.scene, date_style: &self.date_style, time_style: &self.time_style };
+        let tex = Previews::live(&mut self.live, ui.ctx(), &mut app.renderer, slide, &fields, size.x * ppp * quality);
         let painter = ui.painter_at(rect);
         painter.image(tex.id(), rect, egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
 
@@ -539,7 +562,7 @@ impl Editor {
             }
 
         // Overlays
-        let accent = app.palette().accent;
+        let accent = crate::theme::GLACIER;
         if let Some(p) = pointer.filter(|p| rect.contains(*p) && self.drag.is_none()) {
             let sp = to_slide(p);
             if let Some(e) = self.scene.hit_test(sp.0, sp.1).filter(|id| Some(*id) != self.selected).and_then(|id| self.scene.element(id)) {
@@ -599,7 +622,7 @@ impl Editor {
 
         ui.horizontal(|ui| {
             ui.label("Name");
-            ui.text_edit_singleline(&mut e.name);
+            crate::theme::text_field(ui, egui::TextEdit::singleline(&mut e.name), 200.0);
         });
         egui::Grid::new("geom").num_columns(4).spacing([6.0, 4.0]).show(ui, |ui| {
             ui.label("X");
@@ -707,12 +730,21 @@ fn color_edit(ui: &mut egui::Ui, c: &mut Color) -> bool {
     changed
 }
 
+/// Datumsformate zur Auswahl (chrono-Muster, Beispiel).
+pub const DATE_PATTERNS: [(&str, &str); 5] = [
+    ("%d.%m.%Y", "07.12.2024"),
+    ("%d.%m.%y", "07.12.24"),
+    ("%-d.%-m.%Y", "7.12.2024"),
+    ("%d.%m.", "07.12."),
+    ("%Y-%m-%d", "2024-12-07"),
+];
+
 const WEIGHTS: [(u16, &str); 6] = [(100, "Thin"), (300, "Light"), (400, "Regular"), (500, "Medium"), (700, "Bold"), (900, "Black")];
 
 fn text_props(ui: &mut egui::Ui, t: &mut TextStyle, families: &[String], filter: &mut String, focus: &mut bool) {
     ui.label(RichText::new("Text").strong());
     let edit_id = ui.make_persistent_id("text_edit");
-    let resp = ui.add(egui::TextEdit::multiline(&mut t.text).id(edit_id).desired_rows(3).desired_width(f32::INFINITY));
+    let resp = crate::theme::text_area(ui, egui::TextEdit::multiline(&mut t.text).id(edit_id), ui.available_width(), 3);
     if *focus {
         resp.request_focus();
         *focus = false;
@@ -738,7 +770,7 @@ fn text_props(ui: &mut egui::Ui, t: &mut TextStyle, families: &[String], filter:
     egui::Grid::new("text_props").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
         ui.label("Schrift");
         egui::ComboBox::from_id_salt("font").selected_text(&t.font_family).height(400.0).show_ui(ui, |ui| {
-            ui.add(egui::TextEdit::singleline(filter).hint_text("Suchen …"));
+            crate::theme::text_field(ui, egui::TextEdit::singleline(filter).hint_text("Suchen …"), 220.0);
             let f = filter.to_lowercase();
             for fam in families.iter().filter(|n| f.is_empty() || n.to_lowercase().contains(&f)) {
                 ui.selectable_value(&mut t.font_family, fam.clone(), fam);

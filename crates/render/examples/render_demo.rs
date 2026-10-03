@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()> {
         }
         let fields = EventFields { title: title.into(), start, end, all_day: false, location: ort.into(), subtitle: sub.into() };
         let t0 = std::time::Instant::now();
-        let pm = renderer.render(&tpl.scene, &|s| placeholder::resolve(s, &fields, &tpl));
+        let pm = renderer.render(&tpl.scene, &|s| placeholder::resolve(s, &fields, tpl.as_slide_ref()));
         let path = out.join(format!("{slug}.png"));
         slidebear_render::save_png(&pm, &path)?;
         println!("{} ({} ms)", path.display(), t0.elapsed().as_millis());

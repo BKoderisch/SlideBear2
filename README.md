@@ -1,6 +1,6 @@
 # SlideBear
 
-Veranstaltungs-Slides für ProPresenter: Termine kommen aus ChurchTools, werden über Vorlagen automatisch
+Veranstaltungs-Slides für ProPresenter: Termine kommen aus ChurchTools, werden über ihre Slides automatisch
 als PNG gerendert und in einen Export-Ordner gelegt.
 
 ## Starten
@@ -18,28 +18,39 @@ Mit `SLIDEBEAR_DATA=/pfad` lässt sich ein anderer Ordner nutzen (z. B. zum Test
 1. **Einstellungen → ChurchTools**: Adresse, Login-Token (ChurchTools → Profil → Login-Token), „Speichern“,
    „Verbindung testen“, Kalender anhaken.
 2. **Einstellungen → Export**: Ordner wählen, den ProPresenter einliest.
-3. **Vorlagen**: Standard-Layout, eigenes Hintergrundbild oder PPTX-Import.
-4. **Termine**: nach dem Sync einen Termin wählen, Vorlage setzen, „Vorlage für die ganze Serie übernehmen“.
-   Ab dann bekommt jede Wiederholung automatisch ihre Slide.
+3. **Layouts**: Ausgangspunkte für Slides (Standard-Layout, eigenes Hintergrundbild oder PPTX-Import).
+4. **🔄 Sync**, dann im Schnellexport pro Veranstaltung **➕ Slide anlegen** und ein Layout wählen.
+   Die Slide ist eine eigene Kopie und gilt für alle Termine dieser wiederkehrenden Veranstaltung.
 5. **⬆ Exportieren** (oder „Nach jedem Sync automatisch exportieren“).
+
+## Slides und Layouts
+
+- **Layout**: Vorlage für das Aussehen, z. B. „Foto + Titel + Infozeile“. Ändern wirkt nur auf neue Slides.
+- **Slide**: gehört einer Veranstaltung. Wiederkehrende ChurchTools-Termine (gleiche Serie) teilen sich eine
+  Slide; Datum und Uhrzeit kommen per Platzhalter vom jeweiligen Termin. Einzeltermine haben ihre eigene.
+- Exportiert wird pro Veranstaltung nur der **nächste** Termin. Ein einzelnes Datum lässt sich unter
+  „Termine“ überspringen.
 
 ## Am Sonntag: Schnellexport
 
-Die App startet im Tab **⚡ Schnellexport**: alle Termine der nächsten Tage als Tabelle mit Export-Häkchen,
-Termin, Datum, Beginn, Ende und Vorlage. Alles ist direkt editierbar (Tab springt zum nächsten Feld),
-Vorschau beim Darüberfahren, Doppelklick öffnet den Editor. Ein Klick auf **⬆ N Slides exportieren** schreibt
-alle angehakten Slides in den Export-Ordner.
+Die App startet im Tab **⚡ Schnellexport**: eine Zeile pro Veranstaltung mit Export-Häkchen, Termin, Datum,
+Beginn, Ende und den Knöpfen **✏ Bearbeiten** / **➕ Neu** für die Slide. Wiederkehrende Termine erscheinen
+nur einmal („🔁 +3“ zeigt weitere Termine). Vorschau beim Darüberfahren, Doppelklick öffnet den Editor.
+Ein Klick auf **⬆ N Slides exportieren** schreibt alle angehakten Slides in den Export-Ordner.
+Unwichtige ChurchTools-Termine blendet man per Rechtsklick auf Vorschau oder Titel aus, oder dauerhaft per
+Titel-Filter unter Einstellungen → Ausgeblendete Termine.
 
 ## Darstellung
 
-Eisbär-Theme in zwei Varianten: **❄ Polarnacht** (dunkel, Standard) und **☃ Schnee** (hell), umschaltbar unter
-Einstellungen → Darstellung, dazu die Oberflächengröße (Normal/Groß/Sehr groß, auch per Cmd/Strg +/-).
-Logo und App-Icon sind ein selbst gezeichneter Eisbär (`crates/app/src/theme.rs`).
+Comic-Eisbär-Theme (nur hell): Schneeweiß und Gletscherblau, dicke Tinten-Konturen, harte versetzte Schatten,
+sonnengelbe Auswahl, Statuszeile als Sprechblase und die runde Schrift Fredoka (OFL, nur für die Oberfläche).
+Logo und App-Icon sind ein selbst gezeichneter Comic-Eisbär (`crates/app/src/theme.rs`).
+Die Größe der Oberfläche lässt sich unter Einstellungen → Darstellung ändern (auch per Cmd/Strg +/-).
 
 ## Platzhalter
 
 `{titel}` `{datum}` `{zeit}` `{ort}` `{untertitel}` `{wochentag}`. Das Datumsformat und die Zeitdarstellung
-(`15-19 Uhr`, `19:30 Uhr`) werden pro Vorlage eingestellt. Lokale Änderungen an ChurchTools-Terminen bleiben
+(`15-19 Uhr`, `19:30 Uhr`) werden pro Slide eingestellt (in der Editor-Leiste). Lokale Änderungen an ChurchTools-Terminen bleiben
 beim Sync erhalten und lassen sich pro Feld zurücksetzen.
 
 ## Aufbau
@@ -50,7 +61,7 @@ beim Sync erhalten und lassen sich pro Feld zurücksetzen.
 | `crates/render` | Scene → Bild mit tiny-skia + cosmic-text (Roboto mitgeliefert, OFL) |
 | `crates/pptx` | PPTX → bearbeitbare Scene (Text, Bilder, Formen, Hintergründe inkl. Layout/Master) |
 | `crates/churchtools` | REST-Client (Kalender, Termine) |
-| `crates/app` | egui-Oberfläche: Termine, Vorlagen, freier Editor, Import, Einstellungen |
+| `crates/app` | egui-Oberfläche: Schnellexport, Termine, Layouts, freier Editor, Import, Einstellungen |
 
 Beispiele: `cargo run -p slidebear-render --example render_demo -- ausgabe/` und
 `cargo run -p slidebear-render --example import_render -- datei.pptx ausgabe/`.

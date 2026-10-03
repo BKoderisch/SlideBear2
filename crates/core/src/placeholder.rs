@@ -1,6 +1,6 @@
 //! Platzhalter wie `{titel}` in Texten durch Termindaten ersetzen.
 
-use crate::event::{EventFields, Template};
+use crate::event::{EventFields, SlideRef};
 use crate::format::{format_date, format_time, weekday_de};
 
 pub const PLACEHOLDERS: [(&str, &str); 6] = [
@@ -14,7 +14,7 @@ pub const PLACEHOLDERS: [(&str, &str); 6] = [
 
 /// Ersetzt alle bekannten `{name}`-Platzhalter. Unbekannte bleiben unverändert stehen,
 /// damit Tippfehler im Editor sichtbar sind.
-pub fn resolve(text: &str, fields: &EventFields, template: &Template) -> String {
+pub fn resolve(text: &str, fields: &EventFields, slide: SlideRef) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(open) = rest.find('{') {
@@ -23,7 +23,7 @@ pub fn resolve(text: &str, fields: &EventFields, template: &Template) -> String 
         match after.find('}') {
             Some(close) => {
                 let key = &after[..close];
-                match value(key, fields, template) {
+                match value(key, fields, slide) {
                     Some(v) => out.push_str(&v),
                     None => {
                         out.push('{');
@@ -43,11 +43,11 @@ pub fn resolve(text: &str, fields: &EventFields, template: &Template) -> String 
     tidy_separators(&out)
 }
 
-fn value(key: &str, f: &EventFields, t: &Template) -> Option<String> {
+fn value(key: &str, f: &EventFields, t: SlideRef) -> Option<String> {
     Some(match key {
         "titel" => f.title.clone(),
-        "datum" => format_date(f, &t.date_style),
-        "zeit" => format_time(f, &t.time_style),
+        "datum" => format_date(f, t.date_style),
+        "zeit" => format_time(f, t.time_style),
         "ort" => f.location.clone(),
         "untertitel" => f.subtitle.clone(),
         "wochentag" => weekday_de(f.start.date()).to_string(),
@@ -71,6 +71,7 @@ fn tidy_separators(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::Template;
     use crate::scene::Scene;
     use chrono::NaiveDateTime;
 
@@ -88,7 +89,7 @@ mod tests {
     #[test]
     fn resolves_info_line() {
         let t = Template::new("t", Scene::default());
-        assert_eq!(resolve("{datum} | {zeit} | {ort}", &forum(), &t), "17.09.2025 | 19:30 Uhr | FeG Adlershof");
+        assert_eq!(resolve("{datum} | {zeit} | {ort}", &forum(), t.as_slide_ref()), "17.09.2025 | 19:30 Uhr | FeG Adlershof");
     }
 
     #[test]
@@ -96,12 +97,12 @@ mod tests {
         let t = Template::new("t", Scene::default());
         let mut f = forum();
         f.location.clear();
-        assert_eq!(resolve("{datum} | {zeit} | {ort}", &f, &t), "17.09.2025 | 19:30 Uhr");
+        assert_eq!(resolve("{datum} | {zeit} | {ort}", &f, t.as_slide_ref()), "17.09.2025 | 19:30 Uhr");
     }
 
     #[test]
     fn keeps_unknown_and_unclosed() {
         let t = Template::new("t", Scene::default());
-        assert_eq!(resolve("{foo} {titel} {", &forum(), &t), "{foo} Gemeindeforum {");
+        assert_eq!(resolve("{foo} {titel} {", &forum(), t.as_slide_ref()), "{foo} Gemeindeforum {");
     }
 }

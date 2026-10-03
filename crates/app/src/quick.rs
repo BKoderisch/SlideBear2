@@ -1,17 +1,18 @@
-//! Schnellansicht für den Sonntag: alle anstehenden Termine als Tabelle, direkt editierbar,
-//! mit Export-Häkchen und einem großen Export-Knopf.
+//! Schnellansicht für den Sonntag: eine Zeile pro Veranstaltung (wiederkehrende Termine
+//! zusammengefasst), direkt editierbar, mit Export-Häkchen und einem großen Export-Knopf.
 
 use std::collections::{HashMap, HashSet};
 
-use chrono::{Duration, Local};
-use eframe::egui::{self, Color32, RichText, Vec2};
-use slidebear_core::export::{plan, scene_for};
-use slidebear_core::{Event, EventStatus};
+use chrono::{Duration, Local, NaiveDate};
+use eframe::egui::{self, RichText, Vec2};
+use slidebear_core::export::{group_key, groups, plan, GroupKey};
+use slidebear_core::format::weekday_de;
+use slidebear_core::{slide_for, Event, EventStatus, SlideRef};
 use uuid::Uuid;
 
-use crate::app::{template_or_default, App};
-use crate::editor::EditTarget;
+use crate::app::{slide_buttons, App};
 use crate::events::{apply_datetime, parse_date, parse_time, set_title};
+use crate::theme;
 
 /// Texteingaben einer Zeile, solange sie bearbeitet wird.
 #[derive(Default, Clone)]
@@ -46,29 +47,25 @@ impl QuickState {
     }
 }
 
+/// Eine Tabellenzeile: Veranstaltung, ihr nächster Termin und wie viele weitere folgen.
+#[derive(Clone, Copy)]
+struct Row {
+    key: GroupKey,
+    next: Uuid,
+    more: usize,
+}
+
 pub fn show(ui: &mut egui::Ui, app: &mut App) {
-    let pal = app.palette();
     let today = Local::now().date_naive();
     let horizon = today + Duration::days(app.quick.days as i64);
 
-    // Was ein Export jetzt tatsächlich schreiben würde
-    let planned: HashSet<Uuid> = {
+    // Was ein Export jetzt tatsächlich schreiben würde, und die Zeilen (eine pro Veranstaltung)
+    let (planned, rows): (HashSet<Uuid>, Vec<Row>) = {
         let d = &app.store.data;
-        plan(&d.events, &d.templates, &d.links, today, d.settings.export_days).iter().map(|p| p.event.id).collect()
+        let planned = plan(&d.events, &d.series, &d.settings.hide_rules, today, d.settings.export_days).iter().map(|p| p.event.id).collect();
+        let rows = groups(&d.events, &d.series, &d.settings.hide_rules, today, horizon).iter().map(|g| Row { key: g.key, next: g.next.id, more: g.more }).collect();
+        (planned, rows)
     };
-
-    let mut ids: Vec<(Uuid, chrono::NaiveDateTime)> = app
-        .store
-        .data
-        .events
-        .iter()
-        .filter(|e| {
-            let f = e.fields();
-            f.end.unwrap_or(f.start).date() >= today && f.start.date() <= horizon
-        })
-        .map(|e| (e.id, e.fields().start))
-        .collect();
-    ids.sort_by_key(|(_, s)| *s);
 
     egui::Panel::top("quick_head").show(ui, |ui| {
         ui.add_space(6.0);
@@ -78,31 +75,30 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
             ui.add(egui::DragValue::new(&mut app.quick.days).range(1..=365).suffix(" Tage"));
             ui.separator();
             if ui.button("Alle an").clicked() {
-                set_all(app, &ids, true);
+                set_all(app, &rows, true);
             }
             if ui.button("Alle aus").clicked() {
-                set_all(app, &ids, false);
+                set_all(app, &rows, false);
             }
-            if ui.button("➕ Termin").clicked() {
-                let mut fields = crate::app::sample_fields();
-                fields.title = "Neue Veranstaltung".into();
-                fields.subtitle.clear();
-                fields.location.clear();
-                let e = Event::manual(fields, app.store.data.templates.first().map(|t| t.id));
-                app.store.data.events.push(e);
-                app.store.mark_dirty();
+            if ui.button("➕ Termin").on_hover_text("Einzelnen Termin ohne ChurchTools anlegen").clicked() {
+                crate::events::new_manual(app);
             }
         });
         ui.add_space(4.0);
+        crate::app::scope_toggle(ui, &mut app.edit_scope, "nur den angezeigten Termin");
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
             let n = planned.len();
-            let export = egui::Button::new(RichText::new(format!("⬆  {n} Slides exportieren")).size(20.0).strong().color(pal.on_accent))
-                .fill(pal.accent_strong)
-                .min_size(Vec2::new(280.0, 44.0));
-            if ui.add(export).clicked() {
+            let export = egui::Button::new(RichText::new(format!("⬆  {n} Slides exportieren")).size(24.0).color(theme::SNOW))
+                .fill(theme::GLACIER)
+                .stroke(egui::Stroke::new(3.0, theme::INK))
+                .min_size(Vec2::new(320.0, 56.0));
+            if theme::comic_button(ui, export).clicked() {
                 app.export_now();
             }
-            if ui.add_enabled(app.jobs.running == 0, egui::Button::new("🔄 Erst mit ChurchTools abgleichen").min_size(Vec2::new(0.0, 44.0))).clicked() {
+            ui.add_space(8.0);
+            let sync = egui::Button::new("🔄 Erst mit ChurchTools abgleichen").min_size(Vec2::new(0.0, 56.0));
+            if ui.add_enabled_ui(app.jobs.running == 0, |ui| theme::comic_button(ui, sync)).inner.clicked() {
                 let ctx = ui.ctx().clone();
                 app.start_sync(&ctx);
             }
@@ -117,81 +113,109 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
                 }
             }
         });
-        ui.add_space(6.0);
+        ui.add_space(8.0);
     });
 
     egui::CentralPanel::default().show(ui, |ui| {
-        if ids.is_empty() {
+        if rows.is_empty() {
             ui.centered_and_justified(|ui| ui.label("Keine Termine in diesem Zeitraum."));
             return;
         }
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            egui::Grid::new("quick").num_columns(8).striped(true).spacing([14.0, 6.0]).min_row_height(40.0).show(ui, |ui| {
-                for h in ["Export", "", "Termin", "Datum", "Beginn", "Ende", "Vorlage", ""] {
+            egui::Grid::new("quick").num_columns(8).striped(true).spacing([14.0, 6.0]).min_row_height(54.0).show(ui, |ui| {
+                for h in ["Export", "", "Termin", "Datum", "Beginn", "Ende", "Slide", ""] {
                     ui.label(RichText::new(h).strong());
                 }
                 ui.end_row();
-                for (id, _) in &ids {
-                    row(ui, app, *id, planned.contains(id));
+                for r in &rows {
+                    row(ui, app, *r, planned.contains(&r.next), (today, horizon));
                     ui.end_row();
                 }
             });
             ui.add_space(8.0);
             ui.label(
-                RichText::new("Beginn leer = ganztags, Ende leer = offen. Änderungen an ChurchTools-Terminen bleiben beim Sync erhalten.")
-                    .weak()
-                    .small(),
+                RichText::new(
+                    "Wiederkehrende Termine erscheinen einmal und nutzen immer dieselbe Slide; exportiert wird der nächste Termin. \
+                     Beginn leer = ganztags, Ende leer = offen.",
+                )
+                .weak()
+                .small(),
             );
         });
     });
 }
 
-fn set_all(app: &mut App, ids: &[(Uuid, chrono::NaiveDateTime)], on: bool) {
-    for (id, _) in ids {
-        if let Some(e) = app.store.data.event_mut(*id)
-            && (e.template_id.is_some() || e.custom_scene.is_some()) {
-                e.enabled = on;
+fn set_all(app: &mut App, rows: &[Row], on: bool) {
+    for r in rows {
+        match r.key {
+            GroupKey::Series(id) => {
+                if let Some(s) = app.store.data.series_mut(id) {
+                    s.enabled = on;
+                }
             }
+            GroupKey::Single(id) => {
+                if let Some(e) = app.store.data.event_mut(id) {
+                    e.enabled = on;
+                }
+            }
+            // Ohne Slide gibt es nichts zu exportieren
+            GroupKey::Appointment { .. } => {}
+        }
     }
     app.store.mark_dirty();
 }
 
-fn row(ui: &mut egui::Ui, app: &mut App, id: Uuid, planned: bool) {
+fn row(ui: &mut egui::Ui, app: &mut App, r: Row, planned: bool, range: (NaiveDate, NaiveDate)) {
+    let id = r.next;
     let Some(mut ev) = app.store.data.event(id).cloned() else { return };
-    let template = ev.template_id.and_then(|t| app.store.data.template(t)).cloned();
-    let tpl = template_or_default(template.as_ref());
-    let has_scene = scene_for(&ev, template.as_ref()).is_some();
+    let owner = app.owner_of(&ev);
     let cancelled = ev.status == EventStatus::Cancelled;
-    let pal = app.palette();
-
+    let slide = slide_for(&ev, &app.store.data.series).map(|s| (s.scene.clone(), s.date_style.clone(), s.time_style.clone()));
     let mut changed = false;
 
-    // Export-Häkchen
-    ui.add_enabled_ui(has_scene && !cancelled, |ui| {
-        if ui.checkbox(&mut ev.enabled, "").on_disabled_hover_text("Erst eine Vorlage wählen").changed() {
-            changed = true;
+    // Export-Häkchen: bei Serien für die ganze Reihe
+    let mut on = match r.key {
+        GroupKey::Series(sid) => app.store.data.series(sid).is_some_and(|s| s.enabled),
+        _ => ev.enabled,
+    };
+    ui.add_enabled_ui(slide.is_some() && !cancelled, |ui| {
+        if ui.checkbox(&mut on, "").on_disabled_hover_text("Erst eine Slide anlegen").changed() {
+            match r.key {
+                GroupKey::Series(sid) => {
+                    if let Some(s) = app.store.data.series_mut(sid) {
+                        s.enabled = on;
+                    }
+                    app.store.mark_dirty();
+                }
+                _ => {
+                    ev.enabled = on;
+                    changed = true;
+                }
+            }
         }
     });
 
     // Vorschau, groß beim Darüberfahren, Doppelklick öffnet den Editor
-    match scene_for(&ev, template.as_ref()) {
-        Some(scene) => {
+    let thumb_resp = match &slide {
+        Some((scene, ds, ts)) => {
+            let sr = SlideRef { scene, date_style: ds, time_style: ts };
             let f = ev.fields();
-            let tex = app.previews.get(ui.ctx(), &mut app.renderer, scene, &f, &tpl, 128.0);
+            let tex = app.previews.get(ui.ctx(), &mut app.renderer, sr, &f, 128.0);
+            let big = app.previews.get(ui.ctx(), &mut app.renderer, sr, &f, 960.0);
             let resp = ui.add(egui::Image::new(&tex).fit_to_exact_size(Vec2::new(64.0, 36.0)).sense(egui::Sense::click()));
-            let big = app.previews.get(ui.ctx(), &mut app.renderer, scene, &f, &tpl, 960.0);
             if resp.double_clicked() {
-                app.open_editor(EditTarget::Event(id));
+                app.edit_slide(&owner);
             }
-            resp.on_hover_ui(|ui| {
+            Some(resp.on_hover_ui(|ui| {
                 ui.add(egui::Image::new(&big).fit_to_exact_size(Vec2::new(480.0, 270.0)));
                 ui.label(RichText::new("Doppelklick: Slide bearbeiten").small());
-            });
+            }))
         }
         None => {
             ui.label("");
+            None
         }
-    }
+    };
 
     // Eingabe-IDs, um zu erkennen, ob gerade in dieser Zeile getippt wird
     let ids = ["title", "date", "start", "end"].map(|k| ui.make_persistent_id((id, k)));
@@ -201,14 +225,14 @@ fn row(ui: &mut egui::Ui, app: &mut App, id: Uuid, planned: bool) {
         *buf = RowBuf::from_event(&ev);
     }
 
-    let red = |ok: bool| (!ok).then_some(Color32::LIGHT_RED);
-    let title_r = ui.add(egui::TextEdit::singleline(&mut buf.title).id(ids[0]).desired_width(280.0));
+    let red = |ok: bool| (!ok).then_some(theme::CANCELLED_TEXT);
+    let title_r = theme::text_field(ui, egui::TextEdit::singleline(&mut buf.title).id(ids[0]), 300.0);
     let date_ok = parse_date(&buf.date).is_some();
-    let date_r = ui.add(egui::TextEdit::singleline(&mut buf.date).id(ids[1]).desired_width(90.0).hint_text("TT.MM.JJJJ").text_color_opt(red(date_ok)));
+    let date_r = theme::text_field(ui, egui::TextEdit::singleline(&mut buf.date).id(ids[1]).hint_text("TT.MM.JJJJ").text_color_opt(red(date_ok)), 140.0);
     let start_ok = buf.start.trim().is_empty() || parse_time(&buf.start).is_some();
-    let start_r = ui.add(egui::TextEdit::singleline(&mut buf.start).id(ids[2]).desired_width(56.0).hint_text("ganztags").text_color_opt(red(start_ok)));
+    let start_r = theme::text_field(ui, egui::TextEdit::singleline(&mut buf.start).id(ids[2]).hint_text("ganztags").text_color_opt(red(start_ok)), 110.0);
     let end_ok = buf.end.trim().is_empty() || parse_time(&buf.end).is_some();
-    let end_r = ui.add(egui::TextEdit::singleline(&mut buf.end).id(ids[3]).desired_width(56.0).hint_text("offen").text_color_opt(red(end_ok)));
+    let end_r = theme::text_field(ui, egui::TextEdit::singleline(&mut buf.end).id(ids[3]).hint_text("offen").text_color_opt(red(end_ok)), 110.0);
 
     if title_r.changed() {
         set_title(&mut ev, buf.title.clone());
@@ -217,41 +241,64 @@ fn row(ui: &mut egui::Ui, app: &mut App, id: Uuid, planned: bool) {
     if (date_r.changed() || start_r.changed() || end_r.changed()) && apply_datetime(&mut ev, &buf.date, &buf.start, &buf.end) {
         changed = true;
     }
+    if changed {
+        app.commit_event(ev.clone());
+    }
 
-    // Vorlage
-    let current = template.as_ref().map(|t| t.name.clone()).unwrap_or_else(|| "wählen …".into());
-    egui::ComboBox::from_id_salt((id, "tpl")).width(150.0).selected_text(current).show_ui(ui, |ui| {
-        for t in &app.store.data.templates {
-            if ui.selectable_label(ev.template_id == Some(t.id), &t.name).clicked() {
-                ev.template_id = Some(t.id);
-                ev.enabled = true;
-                changed = true;
-            }
-        }
+    // Slide bearbeiten oder neu anlegen
+    ui.horizontal(|ui| {
+        slide_buttons(ui, app, &owner);
     });
 
     // Status
     ui.horizontal(|ui| {
         if cancelled {
-            ui.label(RichText::new("entfallen").color(pal.cancelled_text));
-        } else if !has_scene {
-            ui.label(RichText::new("keine Vorlage").weak());
+            ui.label(RichText::new("entfallen").color(theme::CANCELLED_TEXT));
+        } else if slide.is_none() {
+            ui.label(RichText::new("keine Slide").weak());
         } else if planned {
-            ui.label(RichText::new("✔ wird exportiert").color(pal.ok_text));
-        } else if ev.enabled {
-            ui.label(RichText::new("noch nicht dran").weak()).on_hover_text("Liegt außerhalb des Vorlaufs (Einstellungen bzw. Serien-Verknüpfung)");
+            ui.label(RichText::new("✔ wird exportiert").color(theme::OK_TEXT));
+        } else if !on {
+            ui.label(RichText::new("Export aus").weak());
+        } else {
+            ui.label(RichText::new("noch nicht dran").weak()).on_hover_text("Liegt außerhalb des Vorlaufs (Einstellungen bzw. Veranstaltung)");
         }
-        if ev.is_from_churchtools() && !ev.overrides.is_empty()
-            && ui.button("↺").on_hover_text("Alle Änderungen verwerfen, ChurchTools-Werte nutzen").clicked() {
-                ev.overrides = Default::default();
-                changed = true;
-            }
+        if r.more > 0 {
+            let dates = other_dates(app, r.key, id, range);
+            ui.label(RichText::new(format!("🔁 +{}", r.more)).strong())
+                .on_hover_text(format!("Weitere Termine mit derselben Slide:\n{}", dates.join("\n")));
+        }
     });
 
-    if changed {
-        if let Some(target) = app.store.data.event_mut(id) {
-            *target = ev;
+    // Selten gebraucht, daher nur per Rechtsklick auf Vorschau oder Titel
+    if ev.is_from_churchtools() {
+        let mut hide = false;
+        for resp in [thumb_resp, Some(title_r)].into_iter().flatten() {
+            resp.context_menu(|ui| {
+                if ui.button("Veranstaltung ausblenden").on_hover_text("Alle Termine, auch künftige. Rückgängig unter Einstellungen.").clicked() {
+                    hide = true;
+                    ui.close();
+                }
+            });
         }
-        app.store.mark_dirty();
+        if hide {
+            app.set_hidden(&ev, true);
+        }
     }
+}
+
+/// Daten der anderen Termine derselben Zeile im Zeitraum (für den Tooltip).
+fn other_dates(app: &App, key: GroupKey, except: Uuid, (from, to): (NaiveDate, NaiveDate)) -> Vec<String> {
+    let d = &app.store.data;
+    let mut list: Vec<_> = d
+        .events
+        .iter()
+        .filter(|e| e.id != except && group_key(e, &d.series) == key)
+        .map(|e| e.fields().start)
+        .filter(|s| s.date() >= from && s.date() <= to)
+        .collect();
+    list.sort();
+    list.iter()
+        .map(|s| format!("{} {}", weekday_de(s.date()).get(..2).unwrap_or(""), s.format("%d.%m. %H:%M")))
+        .collect()
 }

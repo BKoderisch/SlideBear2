@@ -1,9 +1,8 @@
-//! Einstellungen: ChurchTools-Zugang, Kalender, Export-Ordner, Serien-Verknüpfungen.
+//! Einstellungen: ChurchTools-Zugang, Kalender, Export-Ordner, wiederkehrende Veranstaltungen.
 
 use eframe::egui::{self, RichText};
 
 use crate::app::App;
-use crate::theme::ThemeKind;
 use crate::store::Store;
 
 pub fn show(ui: &mut egui::Ui, app: &mut App) {
@@ -18,6 +17,8 @@ pub fn show(ui: &mut egui::Ui, app: &mut App) {
             ui.add_space(16.0);
             links(ui, app);
             ui.add_space(16.0);
+            hidden(ui, app);
+            ui.add_space(16.0);
             ui.label(RichText::new(format!("Daten: {}", app.store.root().display())).weak().small());
         });
     });
@@ -29,13 +30,13 @@ fn churchtools(ui: &mut egui::Ui, app: &mut App) {
     egui::Grid::new("ct").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
         ui.label("Adresse");
         changed |= ui
-            .add(egui::TextEdit::singleline(&mut app.store.data.settings.ct_url).hint_text("https://gemeinde.church.tools").desired_width(400.0))
+            .add_sized([440.0, crate::theme::FIELD_H], egui::TextEdit::singleline(&mut app.store.data.settings.ct_url).hint_text("https://gemeinde.church.tools").margin(egui::Margin::symmetric(12, 6)).vertical_align(egui::Align::Center))
             .changed();
         ui.end_row();
 
         ui.label("Login-Token");
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut app.token).password(true).desired_width(300.0));
+            crate::theme::text_field(ui, egui::TextEdit::singleline(&mut app.token).password(true), 320.0);
             if ui.button("Speichern").on_hover_text("Im Schlüsselbund des Systems sichern").clicked() {
                 match Store::store_token(&app.token) {
                     Ok(()) => app.info("Token im Schlüsselbund gespeichert"),
@@ -123,7 +124,7 @@ fn export(ui: &mut egui::Ui, app: &mut App) {
         ui.label("Vorlauf");
         ui.horizontal(|ui| {
             changed |= ui.add(egui::DragValue::new(&mut s.export_days).range(1..=365).suffix(" Tage")).changed();
-            ui.label("(pro Serie in der Liste unten änderbar)");
+            ui.label("(pro Veranstaltung in der Liste unten änderbar)");
         });
         ui.end_row();
 
@@ -142,51 +143,88 @@ fn export(ui: &mut egui::Ui, app: &mut App) {
 }
 
 fn links(ui: &mut egui::Ui, app: &mut App) {
-    ui.heading("Serien-Verknüpfungen");
-    if app.store.data.links.is_empty() {
-        ui.label(RichText::new("Noch keine. Bei einem ChurchTools-Termin „Vorlage für die ganze Serie übernehmen“ wählen.").weak());
+    ui.heading("Wiederkehrende Veranstaltungen");
+    if app.store.data.series.is_empty() {
+        ui.label(RichText::new("Noch keine. Im Schnellexport bei einem ChurchTools-Termin „➕ Slide anlegen“ wählen.").weak());
         return;
     }
     let mut remove = None;
     let mut changed = false;
-    let templates: Vec<(uuid::Uuid, String)> = app.store.data.templates.iter().map(|t| (t.id, t.name.clone())).collect();
-    egui::Grid::new("links").num_columns(5).striped(true).spacing([12.0, 6.0]).show(ui, |ui| {
-        ui.label(RichText::new("Serie").strong());
-        ui.label(RichText::new("Vorlage").strong());
-        ui.label(RichText::new("Vorlauf").strong());
-        ui.label(RichText::new("Standard-Untertitel").strong());
-        ui.label("");
+    egui::Grid::new("series").num_columns(6).striped(true).spacing([12.0, 6.0]).show(ui, |ui| {
+        for h in ["Veranstaltung", "Slide", "Export", "Vorlauf", "Standard-Untertitel", ""] {
+            ui.label(RichText::new(h).strong());
+        }
         ui.end_row();
-        for (i, l) in app.store.data.links.iter_mut().enumerate() {
-            ui.label(&l.title);
-            let current = templates.iter().find(|(id, _)| *id == l.template_id).map(|(_, n)| n.clone()).unwrap_or_default();
-            egui::ComboBox::from_id_salt(("link_tpl", i)).selected_text(current).show_ui(ui, |ui| {
-                for (id, name) in &templates {
-                    changed |= ui.selectable_value(&mut l.template_id, *id, name).changed();
-                }
-            });
-            let mut custom = l.lead_days.is_some();
+        for (i, s) in app.store.data.series.iter_mut().enumerate() {
+            ui.label(&s.title);
+            ui.label(if s.slide.is_some() { "✔" } else { "fehlt" });
+            changed |= ui.checkbox(&mut s.enabled, "").changed();
+            let mut custom = s.lead_days.is_some();
             ui.horizontal(|ui| {
                 if ui.checkbox(&mut custom, "").changed() {
-                    l.lead_days = custom.then_some(14);
+                    s.lead_days = custom.then_some(14);
                     changed = true;
                 }
-                if let Some(d) = &mut l.lead_days {
+                if let Some(d) = &mut s.lead_days {
                     changed |= ui.add(egui::DragValue::new(d).range(1..=365).suffix(" Tage")).changed();
                 } else {
                     ui.label(RichText::new("Standard").weak());
                 }
             });
-            changed |= ui.add(egui::TextEdit::singleline(&mut l.default_subtitle).desired_width(200.0)).changed();
-            if ui.button("🗑").on_hover_text("Verknüpfung entfernen").clicked() {
+            changed |= crate::theme::text_field(ui, egui::TextEdit::singleline(&mut s.default_subtitle), 240.0).changed();
+            if ui.button("🗑").on_hover_text("Veranstaltung samt ihrer Slide entfernen (die Termine bleiben)").clicked() {
                 remove = Some(i);
             }
             ui.end_row();
         }
     });
     if let Some(i) = remove {
-        app.store.data.links.remove(i);
+        app.store.data.series.remove(i);
         changed = true;
+    }
+    if changed {
+        app.store.mark_dirty();
+    }
+}
+
+fn hidden(ui: &mut egui::Ui, app: &mut App) {
+    ui.heading("Ausgeblendete Termine");
+    ui.label(RichText::new("ChurchTools-Termine, deren Titel einen dieser Begriffe enthält, werden nicht angezeigt und nicht exportiert (Groß-/Kleinschreibung egal).").weak().small());
+    let mut changed = false;
+    let mut remove = None;
+    for (i, rule) in app.store.data.settings.hide_rules.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            changed |= crate::theme::text_field(ui, egui::TextEdit::singleline(rule).hint_text("z. B. Putzdienst"), 280.0).changed();
+            if ui.button("🗑").on_hover_text("Filter entfernen").clicked() {
+                remove = Some(i);
+            }
+        });
+    }
+    if let Some(i) = remove {
+        app.store.data.settings.hide_rules.remove(i);
+        changed = true;
+    }
+    if ui.button("➕ Filter hinzufügen").clicked() {
+        app.store.data.settings.hide_rules.push(String::new());
+        changed = true;
+    }
+
+    ui.add_space(8.0);
+    ui.label(RichText::new("Einzeln ausgeblendete Veranstaltungen").strong());
+    let hidden: Vec<(uuid::Uuid, String)> = app.store.data.series.iter().filter(|s| s.hidden).map(|s| (s.id, s.title.clone())).collect();
+    if hidden.is_empty() {
+        ui.label(RichText::new("Keine. Ausblenden per Rechtsklick auf eine Zeile im Schnellexport oder unter Termine.").weak());
+    }
+    for (id, title) in hidden {
+        ui.horizontal(|ui| {
+            ui.label(&title);
+            if ui.button("Einblenden").clicked() {
+                if let Some(s) = app.store.data.series_mut(id) {
+                    s.hidden = false;
+                }
+                changed = true;
+            }
+        });
     }
     if changed {
         app.store.mark_dirty();
@@ -196,23 +234,12 @@ fn links(ui: &mut egui::Ui, app: &mut App) {
 fn appearance(ui: &mut egui::Ui, app: &mut App) {
     ui.heading("Darstellung");
     ui.horizontal(|ui| {
-        ui.label("Theme");
-        let current = app.store.data.settings.theme;
-        for (kind, label) in [(ThemeKind::Polarnacht, "❄ Polarnacht"), (ThemeKind::Schnee, "☃ Schnee")] {
-            if ui.selectable_label(current == kind, label).clicked() {
-                app.store.data.settings.theme = kind;
-                crate::theme::apply(ui.ctx(), kind, app.store.data.settings.ui_scale);
-                app.store.mark_dirty();
-            }
-        }
-    });
-    ui.horizontal(|ui| {
         ui.label("Größe der Oberfläche");
         let current = app.store.data.settings.ui_scale;
         for (scale, label) in [(1.0, "Normal"), (1.2, "Groß"), (1.4, "Sehr groß")] {
             if ui.selectable_label((current - scale).abs() < 0.01, label).clicked() {
                 app.store.data.settings.ui_scale = scale;
-                crate::theme::apply(ui.ctx(), app.store.data.settings.theme, scale);
+                crate::theme::apply(ui.ctx(), scale);
                 app.store.mark_dirty();
             }
         }
