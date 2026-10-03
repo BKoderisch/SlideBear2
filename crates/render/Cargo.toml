@@ -1,0 +1,16 @@
+[package]
+name = "slidebear-render"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+slidebear-core.workspace = true
+image.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tiny-skia = "0.11"
+cosmic-text = "0.14"
+
+[dev-dependencies]
+chrono.workspace = true
+slidebear-pptx.workspace = true

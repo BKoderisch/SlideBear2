@@ -1,0 +1,42 @@
+{
+  "data": [
+    {
+      "base": {
+        "id": 501,
+        "title": "Gebetsabend",
+        "subtitle": "",
+        "allDay": false,
+        "startDate": "2026-10-07T17:00:00Z",
+        "endDate": "2026-10-07T18:30:00Z",
+        "calendar": { "id": 2, "name": "Gemeinde" },
+        "address": { "meetingAt": "Gemeindesaal", "name": null }
+      },
+      "calculated": { "startDate": "2026-10-07T17:00:00Z", "endDate": "2026-10-07T18:30:00Z" }
+    },
+    {
+      "base": {
+        "id": 501,
+        "title": "Gebetsabend",
+        "allDay": false,
+        "startDate": "2026-10-07T17:00:00Z",
+        "endDate": "2026-10-07T18:30:00Z",
+        "calendar": { "id": 2 },
+        "address": { "meetingAt": "Gemeindesaal" }
+      },
+      "calculated": { "startDate": "2026-10-14T17:00:00Z", "endDate": "2026-10-14T18:30:00Z" }
+    },
+    {
+      "base": {
+        "id": 777,
+        "title": "Adventsmarkt",
+        "subtitle": "Fleißige Helfer gesucht!",
+        "allDay": true,
+        "startDate": "2026-12-05",
+        "endDate": "2026-12-05",
+        "calendar": { "id": 3 },
+        "address": null
+      },
+      "calculated": { "startDate": "2026-12-05", "endDate": "2026-12-05" }
+    }
+  ]
+}

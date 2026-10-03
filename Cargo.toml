@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/render", "crates/pptx", "crates/churchtools", "crates/app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+slidebear-core = { path = "crates/core" }
+slidebear-render = { path = "crates/render" }
+slidebear-pptx = { path = "crates/pptx" }
+slidebear-churchtools = { path = "crates/churchtools" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "2"
+anyhow = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }

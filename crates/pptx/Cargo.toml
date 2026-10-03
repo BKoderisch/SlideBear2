@@ -1,0 +1,10 @@
+[package]
+name = "slidebear-pptx"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+slidebear-core.workspace = true
+thiserror.workspace = true
+zip = { version = "2", default-features = false, features = ["deflate"] }
+roxmltree = "0.20"

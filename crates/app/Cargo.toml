@@ -1,0 +1,27 @@
+[package]
+name = "slidebear"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "slidebear"
+path = "src/main.rs"
+
+[dependencies]
+slidebear-core.workspace = true
+slidebear-render.workspace = true
+slidebear-pptx.workspace = true
+slidebear-churchtools.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+anyhow.workspace = true
+image.workspace = true
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "persistence", "wayland", "x11"] }
+egui_extras = { version = "0.36", features = ["image"] }
+rfd = "0.17"
+directories = "6"
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+open = "5"
+tiny-skia = "0.11"
