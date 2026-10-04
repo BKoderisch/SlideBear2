@@ -1,7 +1,7 @@
 name: Release
 
-# Baut SlideBear für Windows. Bei einem Tag `v*` (z. B. v0.1.0) entsteht ein GitHub-Release
-# mit `SlideBear-windows-x64.zip`, das `scripts/install-windows.ps1` herunterlädt.
+# Baut SlideBear2 für Windows. Bei einem Tag `v*` (z. B. v0.1.0) entsteht ein GitHub-Release
+# mit `SlideBear2-windows-x64.zip`, das `scripts/install-windows.ps1` herunterlädt.
 on:
   push:
     tags: ["v*"]
@@ -27,22 +27,22 @@ jobs:
       - name: Paket schnüren
         shell: pwsh
         run: |
-          $dir = "dist/SlideBear"
+          $dir = "dist/SlideBear2"
           New-Item -ItemType Directory -Force $dir | Out-Null
-          Copy-Item target/release/slidebear.exe "$dir/SlideBear.exe"
+          Copy-Item target/release/slidebear.exe "$dir/SlideBear2.exe"
           Copy-Item README.md "$dir/README.md"
           Copy-Item assets/fonts/OFL.txt "$dir/Roboto-OFL.txt"
           Copy-Item assets/fonts/Fredoka-OFL.txt "$dir/Fredoka-OFL.txt"
-          Compress-Archive -Path "$dir/*" -DestinationPath dist/SlideBear-windows-x64.zip -Force
+          Compress-Archive -Path "$dir/*" -DestinationPath dist/SlideBear2-windows-x64.zip -Force
 
       - uses: actions/upload-artifact@v4
         with:
-          name: SlideBear-windows-x64
-          path: dist/SlideBear-windows-x64.zip
+          name: SlideBear2-windows-x64
+          path: dist/SlideBear2-windows-x64.zip
 
       - name: GitHub-Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/SlideBear-windows-x64.zip
+          files: dist/SlideBear2-windows-x64.zip
           generate_release_notes: true

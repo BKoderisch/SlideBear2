@@ -45,7 +45,7 @@ impl Client {
         if !base.ends_with("/api") {
             base.push_str("/api");
         }
-        let http = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(30)).user_agent("SlideBear").build()?;
+        let http = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(30)).user_agent("SlideBear2").build()?;
         Ok(Self { base, token: token.trim().to_string(), http })
     }
 

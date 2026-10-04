@@ -1,4 +1,4 @@
-//! SlideBear: Veranstaltungs-Slides aus ChurchTools für ProPresenter.
+//! SlideBear2: Veranstaltungs-Slides aus ChurchTools für ProPresenter.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -27,11 +27,11 @@ fn main() -> eframe::Result<()> {
     };
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("SlideBear")
+            .with_title("SlideBear2")
             .with_inner_size([1400.0, 900.0])
             .with_min_inner_size([900.0, 600.0])
             .with_icon(std::sync::Arc::new(theme::app_icon(256))),
         ..Default::default()
     };
-    eframe::run_native("SlideBear", options, Box::new(|cc| Ok(Box::new(app::App::new(cc, store)))))
+    eframe::run_native("SlideBear2", options, Box::new(|cc| Ok(Box::new(app::App::new(cc, store)))))
 }

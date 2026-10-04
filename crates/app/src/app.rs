@@ -382,7 +382,7 @@ impl App {
                 if bear.clicked() {
                     self.confetti.burst(bear.rect.center());
                 }
-                theme::comic_title(ui, "SlideBear", 34.0);
+                theme::comic_title(ui, "SlideBear2", 34.0);
                 ui.add_space(12.0);
                 for (v, label) in [
                     (View::Quick, "⚡ Schnellexport"),

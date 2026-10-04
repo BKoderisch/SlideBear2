@@ -8,8 +8,8 @@ fn main() {
     }
     let mut res = winresource::WindowsResource::new();
     res.set_icon("../../assets/icon.ico");
-    res.set("ProductName", "SlideBear");
-    res.set("FileDescription", "SlideBear: Veranstaltungs-Slides aus ChurchTools");
+    res.set("ProductName", "SlideBear2");
+    res.set("FileDescription", "SlideBear2: Veranstaltungs-Slides aus ChurchTools");
     res.set("CompanyName", "ProKode");
     if let Err(e) = res.compile() {
         println!("cargo:warning=Icon konnte nicht eingebettet werden: {e}");

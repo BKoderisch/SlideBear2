@@ -1,4 +1,4 @@
-# SlideBear
+# SlideBear2
 
 Veranstaltungs-Slides für ProPresenter: Termine kommen aus ChurchTools, werden über ihre Slides automatisch
 als PNG gerendert und in einen Export-Ordner gelegt.
@@ -11,11 +11,11 @@ PowerShell öffnen und einfügen (keine Admin-Rechte nötig):
 irm https://raw.githubusercontent.com/BKoderisch/SlideBear2/main/scripts/install-windows.ps1 | iex
 ```
 
-Das Skript lädt die neueste Version von GitHub, installiert sie nach `%LOCALAPPDATA%\Programs\SlideBear` und legt
+Das Skript lädt die neueste Version von GitHub, installiert sie nach `%LOCALAPPDATA%\Programs\SlideBear2` und legt
 Verknüpfungen im Startmenü und auf dem Desktop an. **Erneut ausführen = Update.** Deine Daten liegen getrennt unter
 `%APPDATA%\ProKode\SlideBear` und bleiben erhalten. Weitere Optionen (Skript vorher herunterladen):
 
-- `-Uninstall`: SlideBear entfernen (Daten bleiben)
+- `-Uninstall`: SlideBear2 entfernen (Daten bleiben)
 - `-NoDesktopShortcut`: ohne Desktop-Verknüpfung
 - `-FromSource`: selbst bauen statt herunterladen (installiert Rust und Git bei Bedarf über winget)
 
