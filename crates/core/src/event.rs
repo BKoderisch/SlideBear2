@@ -86,6 +86,12 @@ impl Slide {
         Self { scene, date_style: layout.date_style.clone(), time_style: layout.time_style.clone() }
     }
 
+    /// Slide, die nur aus einem bildschirmfüllenden Bild besteht (z. B. eine fertige Grafik).
+    pub fn from_image(asset: &str) -> Self {
+        let scene = Scene { elements: vec![crate::presets::background(asset, 0.0)], ..Scene::default() };
+        Self { scene, date_style: DateStyle::default(), time_style: TimeStyle::default() }
+    }
+
     pub fn as_ref(&self) -> SlideRef<'_> {
         SlideRef { scene: &self.scene, date_style: &self.date_style, time_style: &self.time_style }
     }
@@ -286,6 +292,16 @@ pub fn migrate(events: &mut [Event], series: &mut [Series], templates: &[Templat
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn slide_from_image_fills_the_scene() {
+        let slide = super::Slide::from_image("ab12.png");
+        let [bg] = slide.scene.elements.as_slice() else { panic!("genau ein Element erwartet") };
+        assert_eq!(bg.frame, crate::scene::Rect::new(0.0, 0.0, 1920.0, 1080.0));
+        let crate::scene::ElementKind::Image(img) = &bg.kind else { panic!() };
+        assert_eq!(img.asset, "ab12.png");
+        assert!(img.filters.is_empty(), "fertige Grafik wird nicht abgedunkelt");
+    }
+
     use super::*;
     use chrono::NaiveDateTime;
 

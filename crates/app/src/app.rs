@@ -281,6 +281,17 @@ impl App {
         self.set_slide(owner, slide);
     }
 
+    /// Bild auswählen und als neue Slide übernehmen: das Bild füllt die ganze Fläche.
+    pub fn pick_image_for(&mut self, owner: &SlideOwner) {
+        let Some(path) = rfd::FileDialog::new().add_filter("Bilder", &["png", "jpg", "jpeg", "webp", "gif", "bmp"]).pick_file() else {
+            return;
+        };
+        match self.store.import_asset_file(&path) {
+            Ok(asset) => self.set_slide(owner, Slide::from_image(&asset)),
+            Err(e) => self.error(e.to_string()),
+        }
+    }
+
     /// Setzt die Slide eines Termins bzw. einer Serie (ersetzt eine vorhandene) und öffnet den Editor.
     pub fn set_slide(&mut self, owner: &SlideOwner, slide: Slide) {
         let target = match owner {
@@ -591,6 +602,7 @@ pub fn slide_buttons(ui: &mut egui::Ui, app: &mut App, owner: &SlideOwner, event
     let has = app.has_slide(owner);
     let mut chosen = None;
     let mut from_pptx = false;
+    let mut from_image = false;
     let mut edit = false;
     if has {
         edit = ui.button("✏ Bearbeiten").on_hover_text("Slide im Editor öffnen").clicked();
@@ -605,6 +617,11 @@ pub fn slide_buttons(ui: &mut egui::Ui, app: &mut App, owner: &SlideOwner, event
             }
         }
         ui.separator();
+        if ui.button("🖼 Aus Bild …").on_hover_text("Ein fertiges Bild als ganze Slide, Texte lassen sich im Editor ergänzen").clicked()
+        {
+            from_image = true;
+            ui.close();
+        }
         if ui.button("📥 Aus PPTX …").on_hover_text("Eine Folie aus einer PowerPoint-Datei als Slide übernehmen").clicked() {
             from_pptx = true;
             ui.close();
@@ -613,11 +630,14 @@ pub fn slide_buttons(ui: &mut egui::Ui, app: &mut App, owner: &SlideOwner, event
     if from_pptx {
         app.pick_pptx_for(owner.clone(), event.fields().title, event.fields());
     }
+    if from_image {
+        app.pick_image_for(owner);
+    }
     if edit {
         app.edit_slide(owner);
     }
     if let Some(layout) = chosen {
         app.new_slide(owner, layout);
     }
-    edit || chosen.is_some() || from_pptx
+    edit || chosen.is_some() || from_pptx || from_image
 }
