@@ -3,12 +3,12 @@
 //! Die Leinwand zeigt das echte Render-Ergebnis (identisch zum Export), egui zeichnet nur
 //! Auswahlrahmen, Anfasser und Hilfslinien darüber.
 
-use eframe::egui::{self, Color32, Key, Pos2, RichText, Sense, Stroke, StrokeKind, Vec2};
+use eframe::egui::{self, Color32, Key, Pos2, RichText, Sense, Stroke, Vec2};
 use slidebear_core::format::{DateStyle, TimeStyle};
 use slidebear_core::placeholder::PLACEHOLDERS;
 use slidebear_core::scene::{
     Color, Element, ElementKind, Filter, HAlign, ImageFit, ImageStyle, Outline, Rect, Scene, Shadow, ShapeKind, ShapeStyle,
-    Stroke as ShapeStroke, TextStyle, VAlign,
+    Stroke as ShapeStroke, TextStyle, VAlign, normalize_degrees, rotate_point,
 };
 use slidebear_core::{EventFields, Series, Slide, SlideRef};
 use uuid::Uuid;
@@ -69,6 +69,10 @@ impl Handle {
 enum DragKind {
     Move,
     Resize(Handle),
+    /// Winkel des Mauszeigers um den Mittelpunkt beim Start der Geste.
+    Rotate {
+        start_angle: f32,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -76,7 +80,22 @@ struct Drag {
     kind: DragKind,
     id: Uuid,
     start_frame: Rect,
+    start_rotation: f32,
     start_pos: (f32, f32),
+}
+
+/// Abstand des Dreh-Anfassers über der Oberkante, in Bildschirm-Punkten.
+const ROTATE_HANDLE_GAP: f32 = 28.0;
+
+/// Winkel im Bereich -180..180, wie man ihn im Eigenschaftenfeld lesen möchte.
+fn signed_degrees(d: f32) -> f32 {
+    let n = normalize_degrees(d);
+    if n > 180.0 { n - 360.0 } else { n }
+}
+
+/// Winkel des Punkts um den Mittelpunkt, in Grad im Uhrzeigersinn (0 = rechts).
+fn angle_around(center: (f32, f32), p: (f32, f32)) -> f32 {
+    (p.1 - center.1).atan2(p.0 - center.0).to_degrees()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -512,22 +531,38 @@ impl Editor {
 
         let to_screen = |x: f32, y: f32| rect.min + Vec2::new(x * scale, y * scale);
         let to_slide = |p: Pos2| ((p.x - rect.min.x) / scale, (p.y - rect.min.y) / scale);
-        let frame_rect = |f: Rect| egui::Rect::from_min_max(to_screen(f.x, f.y), to_screen(f.x + f.w, f.y + f.h));
-        let handle_pos = |f: Rect, h: Handle| {
+        // Punkt im (gedrehten) Rahmen, relativ angegeben (0..1), plus Versatz nach oben in Slide-Pixeln.
+        let local_to_screen = |f: Rect, rot: f32, ax: f32, ay: f32, up: f32| {
+            let (cx, cy) = f.center();
+            let (x, y) = rotate_point(f.w * (ax - 0.5), f.h * (ay - 0.5) - up, rot);
+            to_screen(cx + x, cy + y)
+        };
+        let outline = |f: Rect, rot: f32| -> Vec<Pos2> { f.rotated_corners(rot).iter().map(|&(x, y)| to_screen(x, y)).collect() };
+        let handle_pos = |f: Rect, rot: f32, h: Handle| {
             let (ax, ay) = h.anchor();
-            to_screen(f.x + f.w * ax, f.y + f.h * ay)
+            local_to_screen(f, rot, ax, ay, 0.0)
+        };
+        // Über der Oberkante; ragt das aus der Slide, unter die Unterkante (sonst nicht greifbar).
+        let rotate_handle_pos = |f: Rect, rot: f32| {
+            let above = local_to_screen(f, rot, 0.5, 0.0, ROTATE_HANDLE_GAP / scale);
+            if rect.shrink(6.0).contains(above) { above } else { local_to_screen(f, rot, 0.5, 1.0, -ROTATE_HANDLE_GAP / scale) }
         };
 
         let pointer = ui.ctx().input(|i| i.pointer.hover_pos());
-        let selected_frame = self.selected.and_then(|id| self.scene.element(id)).map(|e| e.frame);
+        let selected = self.selected.and_then(|id| self.scene.element(id)).filter(|e| !e.locked).map(|e| (e.frame, e.rotation));
 
         // Anfasser unter dem Mauszeiger?
         let handle_at = |p: Pos2| -> Option<Handle> {
-            let f = selected_frame?;
-            HANDLES.into_iter().find(|h| handle_pos(f, *h).distance(p) < 8.0)
+            let (f, rot) = selected?;
+            HANDLES.into_iter().find(|h| handle_pos(f, rot, *h).distance(p) < 8.0)
         };
+        let on_rotate_handle = |p: Pos2| selected.is_some_and(|(f, rot)| rotate_handle_pos(f, rot).distance(p) < 9.0);
         if let Some(p) = pointer.filter(|p| rect.contains(*p)) {
-            if let Some(h) = handle_at(p) {
+            if matches!(self.drag.map(|d| d.kind), Some(DragKind::Rotate { .. })) {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            } else if on_rotate_handle(p) {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            } else if let Some(h) = handle_at(p) {
                 ui.ctx().set_cursor_icon(h.cursor());
             } else if self.scene.hit_test(to_slide(p).0, to_slide(p).1).is_some() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
@@ -538,12 +573,15 @@ impl Editor {
             && let Some(origin) = ui.ctx().input(|i| i.pointer.press_origin())
         {
             let sp = to_slide(origin);
-            if let (Some(h), Some(id), Some(f)) = (handle_at(origin), self.selected, selected_frame) {
-                self.drag = Some(Drag { kind: DragKind::Resize(h), id, start_frame: f, start_pos: sp });
+            let start = |kind, id, (f, rot): (Rect, f32)| Drag { kind, id, start_frame: f, start_rotation: rot, start_pos: sp };
+            if let (true, Some(id), Some(sel)) = (on_rotate_handle(origin), self.selected, selected) {
+                self.drag = Some(start(DragKind::Rotate { start_angle: angle_around(sel.0.center(), sp) }, id, sel));
+            } else if let (Some(h), Some(id), Some(sel)) = (handle_at(origin), self.selected, selected) {
+                self.drag = Some(start(DragKind::Resize(h), id, sel));
             } else if let Some(id) = self.scene.hit_test(sp.0, sp.1) {
                 self.selected = Some(id);
-                let f = self.scene.element(id).map(|e| e.frame).unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0));
-                self.drag = Some(Drag { kind: DragKind::Move, id, start_frame: f, start_pos: sp });
+                let sel = self.scene.element(id).map(|e| (e.frame, e.rotation)).unwrap_or((Rect::new(0.0, 0.0, 0.0, 0.0), 0.0));
+                self.drag = Some(start(DragKind::Move, id, sel));
             } else {
                 self.selected = None;
             }
@@ -556,6 +594,7 @@ impl Editor {
             let (shift, alt) = ui.ctx().input(|i| (i.modifiers.shift, i.modifiers.alt));
             let snap = self.snap && !alt;
             let threshold = 8.0 / scale;
+            let mut new_rotation = d.start_rotation;
             let new_frame = match d.kind {
                 DragKind::Move => {
                     let mut f = Rect::new(d.start_frame.x + dx, d.start_frame.y + dy, d.start_frame.w, d.start_frame.h);
@@ -573,14 +612,35 @@ impl Editor {
                     }
                     f
                 }
-                DragKind::Resize(h) => {
+                DragKind::Resize(h) if d.start_rotation == 0.0 => {
                     self.guides.clear();
                     let lines = if snap { Some(self.snap_lines(d.id)) } else { None };
                     resize(d.start_frame, h, dx, dy, shift, lines.as_ref(), threshold, &mut self.guides)
                 }
+                DragKind::Resize(h) => {
+                    // Gedreht: Mausweg in Element-Koordinaten umrechnen, ohne Einrasten an Achsen
+                    self.guides.clear();
+                    let (ldx, ldy) = rotate_point(dx, dy, -d.start_rotation);
+                    let local = resize(d.start_frame, h, ldx, ldy, shift, None, threshold, &mut self.guides);
+                    keep_opposite_anchor(d.start_frame, local, h, d.start_rotation)
+                }
+                DragKind::Rotate { start_angle } => {
+                    self.guides.clear();
+                    let raw = d.start_rotation + angle_around(d.start_frame.center(), (px, py)) - start_angle;
+                    new_rotation = if shift {
+                        (raw / 15.0).round() * 15.0
+                    } else if snap && (raw - (raw / 90.0).round() * 90.0).abs() < 4.0 {
+                        (raw / 90.0).round() * 90.0
+                    } else {
+                        raw.round()
+                    };
+                    new_rotation = signed_degrees(new_rotation);
+                    d.start_frame
+                }
             };
             if let Some(e) = self.scene.element_mut(d.id) {
                 e.frame = new_frame;
+                e.rotation = new_rotation;
             }
         }
         if resp.drag_stopped() {
@@ -608,17 +668,25 @@ impl Editor {
         if let Some(p) = pointer.filter(|p| rect.contains(*p) && self.drag.is_none()) {
             let sp = to_slide(p);
             if let Some(e) = self.scene.hit_test(sp.0, sp.1).filter(|id| Some(*id) != self.selected).and_then(|id| self.scene.element(id)) {
-                painter.rect_stroke(frame_rect(e.frame), 0.0, Stroke::new(1.0, accent.gamma_multiply(0.6)), StrokeKind::Outside);
+                painter.add(egui::Shape::closed_line(outline(e.frame, e.rotation), Stroke::new(1.0, accent.gamma_multiply(0.6))));
             }
         }
         if let Some(e) = self.selected.and_then(|id| self.scene.element(id)) {
-            painter.rect_stroke(frame_rect(e.frame), 0.0, Stroke::new(1.5, accent), StrokeKind::Outside);
+            painter.add(egui::Shape::closed_line(outline(e.frame, e.rotation), Stroke::new(1.5, accent)));
             if !e.locked {
+                let knob = rotate_handle_pos(e.frame, e.rotation);
+                let (n, s) = (handle_pos(e.frame, e.rotation, Handle::N), handle_pos(e.frame, e.rotation, Handle::S));
+                painter.line_segment([if n.distance(knob) < s.distance(knob) { n } else { s }, knob], Stroke::new(1.0, accent));
+                painter.circle_filled(knob, 5.5, Color32::WHITE);
+                painter.circle_stroke(knob, 5.5, Stroke::new(1.0, accent));
                 for h in HANDLES {
-                    let c = handle_pos(e.frame, h);
+                    let c = handle_pos(e.frame, e.rotation, h);
                     let r = egui::Rect::from_center_size(c, Vec2::splat(9.0));
-                    painter.rect_filled(r, 1.0, Color32::WHITE);
-                    painter.rect_stroke(r, 1.0, Stroke::new(1.0, accent), StrokeKind::Inside);
+                    painter.add(egui::Shape::convex_polygon(rotated_square(r, e.rotation), Color32::WHITE, Stroke::new(1.0, accent)));
+                }
+                if let Some(Drag { kind: DragKind::Rotate { .. }, .. }) = self.drag {
+                    let label = format!("{:.0}°", e.rotation);
+                    painter.text(knob + Vec2::new(12.0, -12.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(13.0), accent);
                 }
             }
         }
@@ -651,6 +719,7 @@ impl Editor {
             ui.add_space(8.0);
             ui.label(RichText::new("Tipps").strong());
             ui.label("• Ziehen verschiebt, Anfasser ändern die Größe (Shift: Seitenverhältnis)");
+            ui.label("• Runder Anfasser oben: drehen (Shift: 15°-Schritte)");
             ui.label("• Alt beim Ziehen: ohne Einrasten");
             ui.label("• Pfeiltasten: 1 px, mit Shift 10 px");
             ui.label("• Doppelklick auf Text: Text bearbeiten");
@@ -677,6 +746,22 @@ impl Editor {
             ui.label("H");
             ui.add(egui::DragValue::new(&mut e.frame.h).speed(1.0).range(1.0..=10_000.0));
             ui.end_row();
+        });
+        ui.horizontal(|ui| {
+            ui.label("Drehung");
+            let mut deg = e.rotation;
+            if ui.add(egui::DragValue::new(&mut deg).speed(0.5).range(-360.0..=360.0).suffix("°").max_decimals(1)).changed() {
+                e.rotation = signed_degrees(deg);
+            }
+            if ui.small_button("⟲").on_hover_text("90° gegen den Uhrzeigersinn").clicked() {
+                e.rotation = signed_degrees(e.rotation - 90.0);
+            }
+            if ui.small_button("⟳").on_hover_text("90° im Uhrzeigersinn").clicked() {
+                e.rotation = signed_degrees(e.rotation + 90.0);
+            }
+            if ui.add_enabled(e.rotation != 0.0, egui::Button::new("0°").small()).on_hover_text("Drehung zurücksetzen").clicked() {
+                e.rotation = 0.0;
+            }
         });
         ui.horizontal(|ui| {
             ui.label("Deckkraft");
@@ -774,6 +859,33 @@ fn resize(
         guides.clear();
     }
     Rect::new(l, t, r - l, b - t)
+}
+
+/// Nach dem Größe-Ändern eines gedrehten Elements: Rahmen so verschieben, dass der Punkt gegenüber
+/// dem gezogenen Anfasser auf der Slide stehen bleibt (sonst wandert das Element, weil sich der
+/// Drehpunkt, die Mitte, mit verschiebt).
+fn keep_opposite_anchor(start: Rect, resized: Rect, h: Handle, rotation: f32) -> Rect {
+    let (ax, ay) = h.anchor();
+    let (fx, fy) = (1.0 - ax - 0.5, 1.0 - ay - 0.5);
+    let (sx, sy) = start.center();
+    let (ox, oy) = rotate_point(start.w * fx, start.h * fy, rotation);
+    let fixed = (sx + ox, sy + oy);
+    let (nx, ny) = rotate_point(resized.w * fx, resized.h * fy, rotation);
+    let (cx, cy) = (fixed.0 - nx, fixed.1 - ny);
+    Rect::new(cx - resized.w / 2.0, cy - resized.h / 2.0, resized.w, resized.h)
+}
+
+/// Eckpunkte eines um seine Mitte gedrehten Bildschirm-Rechtecks (für die Anfasser).
+fn rotated_square(r: egui::Rect, rotation: f32) -> Vec<Pos2> {
+    let c = r.center();
+    let (hw, hh) = (r.width() / 2.0, r.height() / 2.0);
+    [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]
+        .into_iter()
+        .map(|(x, y)| {
+            let (rx, ry) = rotate_point(x, y, rotation);
+            c + Vec2::new(rx, ry)
+        })
+        .collect()
 }
 
 fn color_edit(ui: &mut egui::Ui, c: &mut Color) -> bool {
@@ -1022,4 +1134,29 @@ fn pick_image(app: &mut App, build: impl FnOnce(String, f32, f32) -> Element) ->
     };
     let (w, h) = image::image_dimensions(app.store.assets_dir().join(&asset)).unwrap_or((800, 600));
     Some(build(asset, w as f32, h as f32))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rotated_resize_keeps_opposite_corner_in_place() {
+        let start = Rect::new(100.0, 100.0, 200.0, 100.0);
+        let rot = 30.0;
+        let corner = |f: Rect| f.rotated_corners(rot)[0];
+        let mut guides = Vec::new();
+        let local = resize(start, Handle::SE, 40.0, 20.0, false, None, 0.0, &mut guides);
+        let moved = keep_opposite_anchor(start, local, Handle::SE, rot);
+        assert_eq!((moved.w, moved.h), (240.0, 120.0));
+        let (a, b) = (corner(start), corner(moved));
+        assert!((a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3, "{a:?} != {b:?}");
+    }
+
+    #[test]
+    fn degrees_are_signed() {
+        assert_eq!(signed_degrees(270.0), -90.0);
+        assert_eq!(signed_degrees(-190.0), 170.0);
+        assert_eq!(signed_degrees(360.0), 0.0);
+    }
 }

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use slidebear_core::Scene;
-use slidebear_core::scene::{Color, Element, ElementKind, ImageStyle, ShapeKind, ShapeStyle};
+use slidebear_core::scene::{Color, Element, ElementKind, ImageStyle, ShapeKind, ShapeStyle, normalize_degrees};
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform};
 
 pub use text::FontLibrary;
@@ -62,6 +62,21 @@ impl Renderer {
     }
 
     fn draw_element(&mut self, pm: &mut Pixmap, el: &Element, scale: f32, resolve: &dyn Fn(&str) -> String) {
+        let rotation = normalize_degrees(el.rotation);
+        if rotation == 0.0 {
+            return self.draw_unrotated(pm, el, scale, resolve);
+        }
+        // Gedreht: ungedreht in eine Zwischenebene zeichnen und diese um den Mittelpunkt gedreht
+        // aufbringen. So gilt die Drehung für Formen, Bilder und Text (samt Schatten) gleichermaßen.
+        let Some(mut layer) = Pixmap::new(pm.width(), pm.height()) else { return };
+        self.draw_unrotated(&mut layer, el, scale, resolve);
+        let (cx, cy) = el.frame.center();
+        let t = Transform::from_rotate_at(rotation, cx * scale, cy * scale);
+        let paint = PixmapPaint { quality: tiny_skia::FilterQuality::Bilinear, ..PixmapPaint::default() };
+        pm.draw_pixmap(0, 0, layer.as_ref(), &paint, t, None);
+    }
+
+    fn draw_unrotated(&mut self, pm: &mut Pixmap, el: &Element, scale: f32, resolve: &dyn Fn(&str) -> String) {
         match &el.kind {
             ElementKind::Shape(s) => draw_shape(pm, el, s, scale),
             ElementKind::Image(s) => self.draw_image(pm, el, s, scale),
@@ -179,4 +194,24 @@ pub fn save_png(pm: &Pixmap, path: &Path) -> anyhow::Result<()> {
     let img = image::RgbaImage::from_raw(pm.width(), pm.height(), to_rgba(pm)).ok_or_else(|| anyhow::anyhow!("ungültige Bildgröße"))?;
     img.save(path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use slidebear_core::scene::{Rect, ShapeStyle};
+
+    use super::*;
+
+    #[test]
+    fn rotated_shape_is_drawn_rotated() {
+        let mut scene = Scene { width: 100, height: 100, elements: Vec::new() };
+        let style = ShapeStyle { fill: Some(Color::WHITE), ..ShapeStyle::default() };
+        let mut bar = Element::new("bar", Rect::new(0.0, 45.0, 100.0, 10.0), ElementKind::Shape(style));
+        bar.rotation = 90.0;
+        scene.elements.push(bar);
+        let pm = Renderer::new(std::env::temp_dir()).render(&scene, &|s| s.to_string());
+        let px = |x: u32, y: u32| pm.pixel(x, y).unwrap().red();
+        assert_eq!(px(50, 5), 255, "senkrechter Balken oben");
+        assert_eq!(px(5, 50), 0, "waagerechte Lage ist leer");
+    }
 }

@@ -59,6 +59,38 @@ impl Rect {
     pub fn center(&self) -> (f32, f32) {
         (self.x + self.w / 2.0, self.y + self.h / 2.0)
     }
+
+    /// Wie `contains`, aber für einen um den Mittelpunkt gedrehten Rahmen (Grad, im Uhrzeigersinn).
+    pub fn contains_rotated(&self, px: f32, py: f32, degrees: f32) -> bool {
+        if degrees == 0.0 {
+            return self.contains(px, py);
+        }
+        let (cx, cy) = self.center();
+        let (lx, ly) = rotate_point(px - cx, py - cy, -degrees);
+        self.contains(lx + cx, ly + cy)
+    }
+
+    /// Eckpunkte des gedrehten Rahmens: oben links, oben rechts, unten rechts, unten links.
+    pub fn rotated_corners(&self, degrees: f32) -> [(f32, f32); 4] {
+        let (cx, cy) = self.center();
+        let (hw, hh) = (self.w / 2.0, self.h / 2.0);
+        [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)].map(|(x, y)| {
+            let (rx, ry) = rotate_point(x, y, degrees);
+            (rx + cx, ry + cy)
+        })
+    }
+}
+
+/// Dreht einen Vektor um `degrees` im Uhrzeigersinn (Bildschirm-Koordinaten, y nach unten).
+pub fn rotate_point(x: f32, y: f32, degrees: f32) -> (f32, f32) {
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    (x * cos - y * sin, x * sin + y * cos)
+}
+
+/// Bringt einen Winkel in den Bereich 0..360.
+pub fn normalize_degrees(d: f32) -> f32 {
+    let r = d.rem_euclid(360.0);
+    if (r - 360.0).abs() < 1e-3 { 0.0 } else { r }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -128,7 +160,7 @@ impl Scene {
 
     /// Oberstes sichtbares, nicht gesperrtes Element unter dem Punkt.
     pub fn hit_test(&self, x: f32, y: f32) -> Option<Uuid> {
-        self.elements.iter().rev().find(|e| e.visible && !e.locked && e.frame.contains(x, y)).map(|e| e.id)
+        self.elements.iter().rev().find(|e| e.visible && !e.locked && e.frame.contains_rotated(x, y, e.rotation)).map(|e| e.id)
     }
 }
 
@@ -137,6 +169,9 @@ pub struct Element {
     pub id: Uuid,
     pub name: String,
     pub frame: Rect,
+    /// Drehung um den Mittelpunkt in Grad, im Uhrzeigersinn.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rotation: f32,
     pub opacity: f32,
     pub locked: bool,
     pub visible: bool,
@@ -145,13 +180,17 @@ pub struct Element {
 
 impl Element {
     pub fn new(name: impl Into<String>, frame: Rect, kind: ElementKind) -> Self {
-        Self { id: Uuid::new_v4(), name: name.into(), frame, opacity: 1.0, locked: false, visible: true, kind }
+        Self { id: Uuid::new_v4(), name: name.into(), frame, rotation: 0.0, opacity: 1.0, locked: false, visible: true, kind }
     }
 
     /// Kopie mit neuer ID (für Duplizieren und Vorlage → Slide).
     pub fn duplicate(&self) -> Self {
         Self { id: Uuid::new_v4(), ..self.clone() }
     }
+}
+
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -331,5 +370,26 @@ mod tests {
         assert_eq!(scene.hit_test(75.0, 75.0), Some(t));
         assert_eq!(scene.hit_test(10.0, 10.0), Some(b));
         assert_eq!(scene.hit_test(500.0, 500.0), None);
+    }
+
+    #[test]
+    fn hit_test_respects_rotation() {
+        let mut scene = Scene::default();
+        let mut bar = Element::new("bar", Rect::new(0.0, 45.0, 100.0, 10.0), ElementKind::Shape(ShapeStyle::default()));
+        let id = bar.id;
+        bar.rotation = 90.0;
+        scene.elements = vec![bar];
+        // Gedreht steht der Balken senkrecht um (50, 50)
+        assert_eq!(scene.hit_test(50.0, 5.0), Some(id));
+        assert_eq!(scene.hit_test(5.0, 50.0), None);
+    }
+
+    #[test]
+    fn rotation_is_optional_in_json() {
+        let el = Element::new("a", Rect::new(0.0, 0.0, 1.0, 1.0), ElementKind::Shape(ShapeStyle::default()));
+        let json = serde_json::to_string(&el).unwrap();
+        assert!(!json.contains("rotation"));
+        let back: Element = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.rotation, 0.0);
     }
 }

@@ -44,7 +44,7 @@ fn build_pptx() -> Vec<u8> {
         {}
         {}
         <p:sp><p:nvSpPr><p:cNvPr id="4" name="Balken"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
-          <p:spPr><a:xfrm><a:off x="0" y="6000000"/><a:ext cx="12192000" cy="858000"/></a:xfrm><a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom>
+          <p:spPr><a:xfrm rot="-1800000"><a:off x="0" y="6000000"/><a:ext cx="12192000" cy="858000"/></a:xfrm><a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom>
           <a:solidFill><a:srgbClr val="000000"><a:alpha val="50000"/></a:srgbClr></a:solidFill></p:spPr></p:sp>
         <p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="5" name="Tabelle"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr></p:graphicFrame>
         </p:spTree></p:cSld></p:sld>"#,
@@ -113,6 +113,8 @@ fn imports_event_slide() {
     let ElementKind::Shape(bar) = &els[3].kind else { panic!() };
     assert!(matches!(bar.shape, ShapeKind::RoundedRect { .. }));
     assert_eq!(bar.fill, Some(Color::rgba(0, 0, 0, 128)));
+    assert_eq!(els[3].rotation, -30.0);
+    assert_eq!(els[1].rotation, 0.0);
 
     // Smart-Platzhalter funktionieren direkt auf dem Import
     let d = smart::detect(&slide.scene);

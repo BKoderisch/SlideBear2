@@ -381,6 +381,9 @@ impl Ctx<'_> {
                 "pic" => self.picture(n, part, xf, out),
                 "grpSp" => {
                     if let Some(gx) = path(n, &["grpSpPr", "xfrm"]) {
+                        if attr_i64(gx, "rot").is_some_and(|r| r != 0) {
+                            self.warn("Gedrehte Gruppen werden ungedreht importiert");
+                        }
                         self.walk(n, part, group_xf(gx, xf), inherit, out);
                     } else {
                         self.walk(n, part, xf, inherit, out);
@@ -413,23 +416,22 @@ impl Ctx<'_> {
         if path(n, &["blipFill", "srcRect"]).is_some_and(|s| s.attributes().len() > 0) {
             self.warn("Zugeschnittene Bilder werden ungeschnitten importiert");
         }
-        self.check_rotation(n);
         let Some(asset) = self.blip_asset(blip, part) else { return };
         let mut e = Element::new(
             Self::name_of(n, "Bild"),
             frame,
             ElementKind::Image(ImageStyle { asset, fit: ImageFit::Stretch, filters: Vec::new() }),
         );
+        e.rotation = Self::rotation_of(n);
         if let Some(a) = child(blip, "alphaModFix").and_then(|a| attr_i64(a, "amt")) {
             e.opacity = (a as f32 / 100_000.0).clamp(0.0, 1.0);
         }
         out.push(e);
     }
 
-    fn check_rotation(&mut self, n: Node) {
-        if path(n, &["spPr", "xfrm"]).and_then(|x| attr_i64(x, "rot")).is_some_and(|r| r != 0) {
-            self.warn("Gedrehte Elemente werden ungedreht importiert");
-        }
+    /// Drehung aus `spPr/xfrm@rot` (1/60000 Grad, im Uhrzeigersinn).
+    fn rotation_of(n: Node) -> f32 {
+        path(n, &["spPr", "xfrm"]).and_then(|x| attr_i64(x, "rot")).map(|r| r as f32 / 60_000.0).unwrap_or(0.0)
     }
 
     fn shape(&mut self, n: Node, part: &str, xf: Xf, inherit: Option<&Inheritance>, out: &mut Vec<Element>) {
@@ -448,8 +450,8 @@ impl Ctx<'_> {
 
         let frame = path(n, &["spPr", "xfrm"]).and_then(|x| self.frame(x, xf)).or_else(|| inherited.iter().find_map(|i| i.frame));
         let Some(frame) = frame else { return };
-        self.check_rotation(n);
         let name = Self::name_of(n, "Form");
+        let first_new = out.len();
 
         if let Some(sp_pr) = child(n, "spPr") {
             if let Some(blip) = path(sp_pr, &["blipFill", "blip"]) {
@@ -470,6 +472,10 @@ impl Ctx<'_> {
             if let Some(el) = self.text(body, frame, &name, ph_kind.as_deref(), &inherited, styles) {
                 out.push(el);
             }
+        }
+        let rotation = Self::rotation_of(n);
+        for el in &mut out[first_new..] {
+            el.rotation = rotation;
         }
     }
 
