@@ -5,15 +5,24 @@ als PNG gerendert und in einen Export-Ordner gelegt.
 
 ## Installation unter Windows
 
-PowerShell öffnen und einfügen (keine Admin-Rechte nötig):
+Keine Admin-Rechte nötig. Am einfachsten: **Win+R** drücken, diese Zeile einfügen und Enter drücken:
 
-```powershell
-irm https://raw.githubusercontent.com/BKoderisch/SlideBear2/main/scripts/install-windows.ps1 | iex
 ```
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BKoderisch/SlideBear2/main/scripts/install-windows.ps1 | iex"
+```
+
+Das klappt auch, wenn auf dem Rechner die Ausführung von PowerShell-Skripten gesperrt ist („Die Ausführung von
+Skripts ist auf diesem System deaktiviert“), weil das Skript als Text übergeben und nicht als Datei gestartet wird.
+
+Alternativ [`install-windows.cmd`](https://raw.githubusercontent.com/BKoderisch/SlideBear2/main/scripts/install-windows.cmd)
+herunterladen (Rechtsklick › „Link speichern unter …“) und doppelklicken. Zeigt Windows „Der Computer wurde durch
+Windows geschützt“, auf „Weitere Informationen“ › „Trotzdem ausführen“ klicken. In einer schon geöffneten PowerShell
+geht auch direkt `irm https://raw.githubusercontent.com/BKoderisch/SlideBear2/main/scripts/install-windows.ps1 | iex`.
 
 Das Skript lädt die neueste Version von GitHub, installiert sie nach `%LOCALAPPDATA%\Programs\SlideBear2` und legt
 Verknüpfungen im Startmenü und auf dem Desktop an. **Erneut ausführen = Update.** Deine Daten liegen getrennt unter
-`%APPDATA%\ProKode\SlideBear` und bleiben erhalten. Weitere Optionen (Skript vorher herunterladen):
+`%APPDATA%\ProKode\SlideBear` und bleiben erhalten. Weitere Optionen, z. B. in der Eingabeaufforderung als
+`install-windows.cmd -Uninstall`:
 
 - `-Uninstall`: SlideBear2 entfernen (Daten bleiben)
 - `-NoDesktopShortcut`: ohne Desktop-Verknüpfung
